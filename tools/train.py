@@ -185,7 +185,7 @@ def main():
 
     crop_size = (config.TRAIN.IMAGE_SIZE[1], config.TRAIN.IMAGE_SIZE[0])
 
-    train_dataset = eval('datasets.'+config.DATASET.DATASET)(
+    train_dataset_kwargs = dict(
                         root=config.DATASET.ROOT,
                         list_path=config.DATASET.TRAIN_SET,
                         num_samples=None,
@@ -197,6 +197,11 @@ def main():
                         crop_size=crop_size,
                         downsample_rate=config.TRAIN.DOWNSAMPLERATE,
                         scale_factor=config.TRAIN.SCALE_FACTOR)
+    if config.DATASET.DATASET == 'rsm':
+        train_dataset_kwargs['sequence'] = config.TRAIN.SEQUENCE_MODE
+        train_dataset_kwargs['sequence_len'] = config.TRAIN.SEQUENCE_LEN
+
+    train_dataset = eval('datasets.'+config.DATASET.DATASET)(**train_dataset_kwargs)
 
     train_sampler = get_sampler(train_dataset)
 
@@ -212,8 +217,7 @@ def main():
     extra_epoch_iters = 0
 
     if config.DATASET.EXTRA_TRAIN_SET:
-
-        extra_train_dataset = eval('datasets.'+config.DATASET.DATASET)(
+        extra_train_dataset_kwargs = dict(
                     root=config.DATASET.ROOT,
                     list_path=config.DATASET.EXTRA_TRAIN_SET,
                     num_samples=None,
@@ -225,6 +229,11 @@ def main():
                     crop_size=crop_size,
                     downsample_rate=config.TRAIN.DOWNSAMPLERATE,
                     scale_factor=config.TRAIN.SCALE_FACTOR)
+        if config.DATASET.DATASET == 'rsm':
+            extra_train_dataset_kwargs['sequence'] = config.TRAIN.SEQUENCE_MODE
+            extra_train_dataset_kwargs['sequence_len'] = config.TRAIN.SEQUENCE_LEN
+
+        extra_train_dataset = eval('datasets.'+config.DATASET.DATASET)(**extra_train_dataset_kwargs)
 
         extra_train_sampler = get_sampler(extra_train_dataset)
 
@@ -243,7 +252,7 @@ def main():
 
     test_size = (config.TEST.IMAGE_SIZE[1], config.TEST.IMAGE_SIZE[0])
 
-    test_dataset = eval('datasets.'+config.DATASET.DATASET)(
+    test_dataset_kwargs = dict(
                         root=config.DATASET.ROOT,
                         list_path=config.DATASET.TEST_SET,
                         num_samples=config.TEST.NUM_SAMPLES,
@@ -254,6 +263,8 @@ def main():
                         base_size=config.TEST.BASE_SIZE,
                         crop_size=test_size,
                         downsample_rate=1)
+
+    test_dataset = eval('datasets.'+config.DATASET.DATASET)(**test_dataset_kwargs)
 
     test_sampler = get_sampler(test_dataset)
 

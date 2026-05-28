@@ -19,6 +19,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from config import config
+
 class FullModel(nn.Module):
   """
   Distribute the loss on multi-gpu to reduce 
@@ -31,10 +33,26 @@ class FullModel(nn.Module):
     self.model = model
     self.loss = loss
 
+  def _flatten_sequence_tensor(self, tensor):
+    if isinstance(tensor, (list, tuple)):
+        return type(tensor)([self._flatten_sequence_tensor(t) for t in tensor])
+    if tensor.dim() == 5:
+        return tensor.view(-1, tensor.size(2), tensor.size(3), tensor.size(4))
+    return tensor
+
+  def _flatten_sequence_labels(self, labels):
+    if labels.dim() == 4:
+        return labels.view(-1, labels.size(2), labels.size(3))
+    return labels
+
   def pixel_acc(self, pred, label):
     if isinstance(pred, (list, tuple)):
         output_index = min(config.TEST.OUTPUT_INDEX, len(pred) - 1)
         pred = pred[output_index]
+    if pred.dim() == 5:
+        pred = pred.view(-1, pred.size(2), pred.size(3), pred.size(4))
+    if label.dim() == 4:
+        label = label.view(-1, label.size(2), label.size(3))
     if pred.shape[2] != label.shape[1] or pred.shape[3] != label.shape[2]:
         pred = F.interpolate(pred, size=label.shape[1:], mode="bilinear", align_corners=False)
     _, preds = torch.max(pred, dim=1)
@@ -47,6 +65,8 @@ class FullModel(nn.Module):
 
   def forward(self, inputs, labels, *args, **kwargs):
     outputs = self.model(inputs, *args, **kwargs)
+    outputs = self._flatten_sequence_tensor(outputs)
+    labels = self._flatten_sequence_labels(labels)
     loss = self.loss(outputs, labels)
     acc  = self.pixel_acc(outputs, labels)
     return torch.unsqueeze(loss,0), outputs, acc

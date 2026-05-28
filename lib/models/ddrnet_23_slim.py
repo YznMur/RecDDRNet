@@ -5,6 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn import init
 from collections import OrderedDict
+from .temporal_attention import TemporalAttentionBlock
 
 BatchNorm2d = nn.BatchNorm2d
 bn_mom = 0.1
@@ -202,11 +203,14 @@ class segmenthead(nn.Module):
 
 class DualResNet(nn.Module):
 
-    def __init__(self, block, layers, num_classes=19, planes=64, spp_planes=128, head_planes=128, augment=True):
+    def __init__(self, block, layers, num_classes=19, planes=64, spp_planes=128, head_planes=128, augment=True,
+                 use_temporal_attention=False, attn_heads=4, attn_head_dim=32):
         super(DualResNet, self).__init__()
 
         highres_planes = planes * 2
         self.augment = augment
+        self.use_temporal_attention = use_temporal_attention
+        self.temporal_memory = None
 
         self.conv1 =  nn.Sequential(
                           nn.Conv2d(3,planes,kernel_size=3, stride=2, padding=1),
@@ -260,7 +264,14 @@ class DualResNet(nn.Module):
             self.seghead_extra = segmenthead(highres_planes, head_planes, num_classes)            
 
         self.final_layer = segmenthead(planes * 4, head_planes, num_classes)
-
+        if self.use_temporal_attention:
+            self.temporal_attention = TemporalAttentionBlock(
+                planes * 4,
+                heads=attn_heads,
+                head_dim=attn_head_dim
+            )
+        else:
+            self.temporal_attention = None
 
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
@@ -270,28 +281,10 @@ class DualResNet(nn.Module):
                 nn.init.constant_(m.bias, 0)
 
 
-    def _make_layer(self, block, inplanes, planes, blocks, stride=1):
-        downsample = None
-        if stride != 1 or inplanes != planes * block.expansion:
-            downsample = nn.Sequential(
-                nn.Conv2d(inplanes, planes * block.expansion,
-                          kernel_size=1, stride=stride, bias=False),
-                nn.BatchNorm2d(planes * block.expansion, momentum=bn_mom),
-            )
+    def reset_temporal_memory(self):
+        self.temporal_memory = None
 
-        layers = []
-        layers.append(block(inplanes, planes, stride, downsample))
-        inplanes = planes * block.expansion
-        for i in range(1, blocks):
-            if i == (blocks-1):
-                layers.append(block(inplanes, planes, stride=1, no_relu=True))
-            else:
-                layers.append(block(inplanes, planes, stride=1, no_relu=False))
-
-        return nn.Sequential(*layers)
-
-
-    def forward(self, x):
+    def _forward_frame(self, x):
 
         width_output = x.shape[-1] // 8
         height_output = x.shape[-2] // 8
@@ -333,16 +326,77 @@ class DualResNet(nn.Module):
                         size=[height_output, width_output],
                         mode='bilinear')
 
+        if self.use_temporal_attention and self.temporal_attention is not None:
+            x_, self.temporal_memory = self.temporal_attention(
+                x_, self.temporal_memory)
+
         x_ = self.final_layer(x + x_)
 
-        if self.augment: 
+        if self.augment:
             x_extra = self.seghead_extra(temp)
             return [x_extra, x_]
         else:
-            return x_      
+            return x_
+
+    def _make_layer(self, block, inplanes, planes, blocks, stride=1):
+        downsample = None
+        if stride != 1 or inplanes != planes * block.expansion:
+            downsample = nn.Sequential(
+                nn.Conv2d(inplanes, planes * block.expansion,
+                          kernel_size=1, stride=stride, bias=False),
+                nn.BatchNorm2d(planes * block.expansion, momentum=bn_mom),
+            )
+
+        layers = []
+        layers.append(block(inplanes, planes, stride, downsample))
+        inplanes = planes * block.expansion
+        for i in range(1, blocks):
+            if i == (blocks-1):
+                layers.append(block(inplanes, planes, stride=1, no_relu=True))
+            else:
+                layers.append(block(inplanes, planes, stride=1, no_relu=False))
+
+        return nn.Sequential(*layers)
+
+
+    def forward(self, x):
+        single_input = x.dim() == 4
+        if single_input:
+            x = x.unsqueeze(1)
+
+        outputs = []
+        for t in range(x.size(1)):
+            frame = x[:, t]
+            outputs.append(self._forward_frame(frame))
+
+        if self.augment:
+            x_extra = [out[0] for out in outputs]
+            x_main = [out[1] for out in outputs]
+            outputs = [torch.stack(x_extra, dim=1), torch.stack(x_main, dim=1)]
+        else:
+            outputs = torch.stack(outputs, dim=1)
+
+        if single_input:
+            if self.augment:
+                outputs = [out[:, 0] for out in outputs]
+            else:
+                outputs = outputs[:, 0]
+
+        return outputs
 
 def DualResNet_imagenet(cfg, pretrained=False):
-    model = DualResNet(BasicBlock, [2, 2, 2, 2], num_classes=cfg.DATASET.NUM_CLASSES, planes=32, spp_planes=128, head_planes=64, augment=True)
+    model = DualResNet(
+        BasicBlock,
+        [2, 2, 2, 2],
+        num_classes=cfg.DATASET.NUM_CLASSES,
+        planes=32,
+        spp_planes=128,
+        head_planes=64,
+        augment=True,
+        use_temporal_attention=cfg.MODEL.USE_TEMPORAL_ATTENTION,
+        attn_heads=cfg.MODEL.ATTN_HEADS,
+        attn_head_dim=cfg.MODEL.ATTN_HEAD_DIM,
+    )
     if pretrained:
         pretrained_state = torch.load(cfg.MODEL.PRETRAINED, map_location='cpu') 
         model_dict = model.state_dict()

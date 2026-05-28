@@ -28,11 +28,15 @@ class RSM(BaseDataset):
                  crop_size=(512, 1024), 
                  downsample_rate=1,
                  scale_factor=16,
+                 sequence=False,
+                 sequence_len=1,
                  mean=[0.485, 0.456, 0.406], 
                  std=[0.229, 0.224, 0.225]):
 
         super(RSM, self).__init__(ignore_label, base_size,
                 crop_size, downsample_rate, scale_factor, mean, std,)
+        self.sequence = sequence
+        self.sequence_len = max(1, sequence_len)
 
         self.root = root
         self.list_path = list_path
@@ -54,6 +58,7 @@ class RSM(BaseDataset):
         # self.label_mapping = {i: i for i in range(17)}
         self.class_weights = torch.FloatTensor([1.0, 1.0, 1.0, 1.0, 
                                         3.0]).cuda()
+        self.sequence_keys = [self._extract_sequence_key(item[0]) for item in self.img_list]
         # self.class_weights = None
         
     def read_files(self):
@@ -88,6 +93,28 @@ class RSM(BaseDataset):
                 label[temp == k] = v
         return label
 
+    def _extract_sequence_key(self, img_path):
+        basename = os.path.splitext(os.path.basename(img_path))[0]
+        parts = basename.split('_frame_')
+        return parts[0] if len(parts) > 1 else basename
+
+    def _get_sequence_indices(self, index):
+        if not self.sequence or self.sequence_len <= 1:
+            return [index]
+
+        key = self.sequence_keys[index]
+        start = index - self.sequence_len + 1
+        indices = []
+        for idx in range(start, index + 1):
+            if idx < 0 or self.sequence_keys[idx] != key:
+                if len(indices) > 0:
+                    indices.append(indices[0])
+                else:
+                    indices.append(index)
+            else:
+                indices.append(idx)
+        return indices
+
     def __getitem__(self, index):
         item = self.files[index]
         name = item["name"]
@@ -109,6 +136,25 @@ class RSM(BaseDataset):
                            cv2.IMREAD_GRAYSCALE)
         # print(os.path.join(self.root,'rsm',item["label"]))
         label = self.convert_label(label)
+
+        if self.sequence:
+            indices = self._get_sequence_indices(index)
+            images = []
+            labels = []
+            for idx in indices:
+                seq_item = self.files[idx]
+                seq_image = cv2.imread(os.path.join(self.root,'rsm',seq_item['img']),
+                                       cv2.IMREAD_COLOR)
+                seq_label = cv2.imread(os.path.join(self.root,'rsm',seq_item['label']),
+                                       cv2.IMREAD_GRAYSCALE)
+                seq_label = self.convert_label(seq_label)
+                seq_image, seq_label = self.gen_sample(seq_image, seq_label,
+                                                      self.multi_scale, self.flip)
+                images.append(seq_image.copy())
+                labels.append(seq_label.copy())
+            images = np.stack(images, axis=0)
+            labels = np.stack(labels, axis=0)
+            return images.copy(), labels.copy(), np.array(size), name
 
         image, label = self.gen_sample(image, label, 
                                 self.multi_scale, self.flip)
