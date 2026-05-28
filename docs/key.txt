@@ -1,0 +1,9 @@
+api {
+  api_server: http://192.168.234.3:9420
+  web_server: http://192.168.234.3:9422
+  files_server: http://192.168.234.3:9421
+  credentials {
+    access_key = "9MAO6F4MJKB84JJDG4KETDY14Q1U5R"
+    secret_key = "nNVfJhLcj2UeO3ipYJitaC592OvTHvLRJbCnlL8OxoqAqZkq7HXsFSRDD7rrkbTtqjU"
+  }
+}

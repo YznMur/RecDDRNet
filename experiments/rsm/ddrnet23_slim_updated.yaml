@@ -1,0 +1,83 @@
+CUDNN:
+  BENCHMARK: true
+  DETERMINISTIC: false
+  ENABLED: true
+
+GPUS: (0,)
+OUTPUT_DIR: 'RSM_v3_aug_stronger_photometric_poly'
+LOG_DIR: 'log'
+WORKERS: 8
+PRINT_FREQ: 20
+
+DATASET:
+  DATASET: rsm
+  ROOT: data/
+  TEST_SET: 'list/rsm/val_RSMdataset_v2.lst'
+  TRAIN_SET: 'list/rsm/train_RSMdataset_v2.lst'
+  NUM_CLASSES: 4
+
+MODEL:
+  NAME: ddrnet_23_slim
+  NUM_OUTPUTS: 2
+  PRETRAINED: "pretrained_models/DDRNet23s_cityscapes.pth"
+  ALIGN_CORNERS: false
+
+LOSS:
+  USE_OHEM: true
+  OHEMTHRES: 0.7
+  OHEMKEEP: 32768
+  BALANCE_WEIGHTS: [1, 0.4]
+
+TRAIN:
+  IMAGE_SIZE:
+    - 1024
+    - 512
+  BASE_SIZE: 2048
+  BATCH_SIZE_PER_GPU: 8
+  SHUFFLE: true
+  BEGIN_EPOCH: 0
+  END_EPOCH: 600
+  RESUME: true
+
+  OPTIMIZER: sgd
+  LR: 0.01              # slightly higher for poly schedule
+  WD: 0.0005
+  MOMENTUM: 0.9
+  NESTEROV: true
+
+  # -------- Poly LR --------
+  USE_POLY_LR: true
+  POLY_POWER: 0.9
+  # -------------------------
+
+  FLIP: true
+  MULTI_SCALE: true
+  DOWNSAMPLERATE: 1
+  IGNORE_LABEL: -1
+  SCALE_FACTOR: 16   # kept but unused in new random.uniform()
+
+  # ---------------- AUGMENTATION FLAGS ----------------
+  # (Photometric now handled inside dataset script)
+
+  RANDOM_BRIGHTNESS: false
+  RANDOM_BRIGHTNESS_SHIFT_VALUE: 0
+
+  RANDOM_ROTATION: true
+  ROTATION_MAX_DEGREE: 5
+
+  RANDOM_BLUR: false
+  RANDOM_CONTRAST: false
+  RANDOM_CUTOUT: false
+  CUTOUT_MAX_SIZE: 0
+  # ----------------------------------------------------
+
+TEST:
+  IMAGE_SIZE:
+    - 2048
+    - 1024
+  BASE_SIZE: 2048
+  BATCH_SIZE_PER_GPU: 2
+  FLIP_TEST: true          # enable for +0.3–0.6 mIoU boost
+  MULTI_SCALE: false
+  SCALE_LIST: [1]
+  OUTPUT_INDEX: 1
