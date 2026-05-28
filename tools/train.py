@@ -196,6 +196,8 @@ def main():
                         base_size=config.TRAIN.BASE_SIZE,
                         crop_size=crop_size,
                         downsample_rate=config.TRAIN.DOWNSAMPLERATE,
+                        sequence=config.TRAIN.SEQUENCE_MODE,
+                        sequence_len=config.TRAIN.SEQUENCE_LEN,
                         scale_factor=config.TRAIN.SCALE_FACTOR)
 
     train_sampler = get_sampler(train_dataset)

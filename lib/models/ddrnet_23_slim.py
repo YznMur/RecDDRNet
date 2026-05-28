@@ -6,6 +6,8 @@ import torch.nn.functional as F
 from torch.nn import init
 from collections import OrderedDict
 
+from .convlstm import ConvLSTMCell
+
 BatchNorm2d = nn.BatchNorm2d
 bn_mom = 0.1
 
@@ -202,11 +204,14 @@ class segmenthead(nn.Module):
 
 class DualResNet(nn.Module):
 
-    def __init__(self, block, layers, num_classes=19, planes=64, spp_planes=128, head_planes=128, augment=True):
+    def __init__(self, block, layers, num_classes=19, planes=64, spp_planes=128, head_planes=128, augment=True, use_convlstm=False, convlstm_hidden_dim=128):
         super(DualResNet, self).__init__()
 
         highres_planes = planes * 2
         self.augment = augment
+        self.use_convlstm = use_convlstm
+        self.convlstm_hidden_dim = convlstm_hidden_dim
+        self.hidden_state = None
 
         self.conv1 =  nn.Sequential(
                           nn.Conv2d(3,planes,kernel_size=3, stride=2, padding=1),
@@ -261,6 +266,12 @@ class DualResNet(nn.Module):
 
         self.final_layer = segmenthead(planes * 4, head_planes, num_classes)
 
+        if self.use_convlstm:
+            self.temporal = ConvLSTMCell(
+                input_dim=planes * 4,
+                hidden_dim=self.convlstm_hidden_dim,
+                kernel_size=3,
+            )
 
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
@@ -290,9 +301,43 @@ class DualResNet(nn.Module):
 
         return nn.Sequential(*layers)
 
+    def reset_hidden_state(self):
+        self.hidden_state = None
 
-    def forward(self, x):
+    def forward(self, x, return_hidden=False):
+        if self.use_convlstm and x.dim() == 5:
+            outputs = []
+            hidden = None
+            for t in range(x.size(1)):
+                out, hidden = self._forward_frame(x[:, t], hidden)
+                outputs.append(out)
+            outputs = torch.stack(outputs, dim=1)
+            if return_hidden:
+                return outputs, hidden
+            return outputs
 
+        if self.use_convlstm and x.dim() == 4:
+            out, hidden = self._forward_frame(x, self.hidden_state)
+            self.hidden_state = (hidden[0].detach(), hidden[1].detach())
+            if return_hidden:
+                return out, hidden
+            return out
+
+        if x.dim() == 5:
+            outputs = []
+            for t in range(x.size(1)):
+                outputs.append(self._forward_frame(x[:, t])[0])
+            outputs = torch.stack(outputs, dim=1)
+            if return_hidden:
+                return outputs, None
+            return outputs
+
+        out, _ = self._forward_frame(x)
+        if return_hidden:
+            return out, None
+        return out
+
+    def _forward_frame(self, x, hidden=None):
         width_output = x.shape[-1] // 8
         height_output = x.shape[-2] // 8
         layers = []
@@ -333,16 +378,35 @@ class DualResNet(nn.Module):
                         size=[height_output, width_output],
                         mode='bilinear')
 
-        x_ = self.final_layer(x + x_)
+        x = x + x_
 
-        if self.augment: 
+        if self.use_convlstm:
+            if hidden is None:
+                hidden = self.temporal.init_hidden(x)
+            h, c = self.temporal(x, hidden)
+            x = h
+            hidden = (h, c)
+
+        x_ = self.final_layer(x)
+
+        if self.augment:
             x_extra = self.seghead_extra(temp)
-            return [x_extra, x_]
+            return [x_extra, x_], hidden
         else:
-            return x_      
+            return x_, hidden
 
 def DualResNet_imagenet(cfg, pretrained=False):
-    model = DualResNet(BasicBlock, [2, 2, 2, 2], num_classes=cfg.DATASET.NUM_CLASSES, planes=32, spp_planes=128, head_planes=64, augment=True)
+    model = DualResNet(
+        BasicBlock,
+        [2, 2, 2, 2],
+        num_classes=cfg.DATASET.NUM_CLASSES,
+        planes=32,
+        spp_planes=128,
+        head_planes=64,
+        augment=True,
+        use_convlstm=getattr(cfg.MODEL, 'USE_CONVLSTM', False),
+        convlstm_hidden_dim=getattr(cfg.MODEL, 'CONVLSTM_HIDDEN_DIM', 128),
+    )
     if pretrained:
         pretrained_state = torch.load(cfg.MODEL.PRETRAINED, map_location='cpu') 
         model_dict = model.state_dict()

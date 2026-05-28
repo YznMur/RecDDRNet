@@ -27,6 +27,8 @@ class RSM(BaseDataset):
                  base_size=2048, 
                  crop_size=(512, 1024), 
                  downsample_rate=1,
+                 sequence=False,
+                 sequence_len=1,
                  scale_factor=16,
                  mean=[0.485, 0.456, 0.406], 
                  std=[0.229, 0.224, 0.225]):
@@ -40,8 +42,11 @@ class RSM(BaseDataset):
 
         self.multi_scale = multi_scale
         self.flip = flip
+        self.sequence = sequence
+        self.sequence_len = max(1, sequence_len)
         
-        self.img_list = [line.strip().split() for line in open(root+list_path)]
+        file_path = os.path.join(root, list_path)
+        self.img_list = [line.strip().split() for line in open(file_path)]
 
         self.files = self.read_files()
         if num_samples:
@@ -78,6 +83,11 @@ class RSM(BaseDataset):
                 })
         return files
         
+    def __len__(self):
+        if self.sequence and self.sequence_len > 1:
+            return max(0, len(self.files) - self.sequence_len + 1)
+        return len(self.files)
+
     def convert_label(self, label, inverse=False):
         temp = label.copy()
         if inverse:
@@ -89,31 +99,47 @@ class RSM(BaseDataset):
         return label
 
     def __getitem__(self, index):
-        item = self.files[index]
-        name = item["name"]
-        image = cv2.imread(os.path.join(self.root,'rsm',item["img"]),
-                           cv2.IMREAD_COLOR)
-        size = image.shape
-        # print (image)
-        # image = cv2.resize(image, (2048, 1024), interpolation=cv2.INTER_LINEAR)
+        if self.sequence and self.sequence_len > 1 and 'test' not in self.list_path and 'camera' not in self.list_path:
+            sequence = self.files[index:index + self.sequence_len]
+            if len(sequence) < self.sequence_len:
+                sequence = sequence + [sequence[-1]] * (self.sequence_len - len(sequence))
+        else:
+            sequence = [self.files[index]]
+
+        images = []
+        labels = []
+        size = None
+        name = sequence[-1]["name"]
+
+        for item in sequence:
+            image = cv2.imread(os.path.join(self.root, item["img"]),
+                               cv2.IMREAD_COLOR)
+            if size is None:
+                size = image.shape
+
+            if 'test' in self.list_path or 'camera' in self.list_path:
+                image = self.input_transform(image)
+                image = image.transpose((2, 0, 1))
+                images.append(image.copy())
+                continue
+
+            label = cv2.imread(os.path.join(self.root, item["label"]),
+                               cv2.IMREAD_GRAYSCALE)
+            label = self.convert_label(label)
+            image, label = self.gen_sample(image, label,
+                                          self.multi_scale, self.flip)
+            images.append(image.copy())
+            labels.append(label.copy())
 
         if 'test' in self.list_path or 'camera' in self.list_path:
-            # print("*****************************************")
-            # image = cv2.resize(image, (2048, 1024), interpolation=cv2.INTER_LINEAR)
-            image = self.input_transform(image)
-            image = image.transpose((2, 0, 1))
+            if len(images) == 1:
+                return images[0], np.array(size), name
+            return np.stack(images, axis=0), np.array(size), name
 
-            return image.copy(), np.array(size), name
+        if len(images) == 1:
+            return images[0], labels[0], np.array(size), name
 
-        label = cv2.imread(os.path.join(self.root,'rsm',item["label"]),
-                           cv2.IMREAD_GRAYSCALE)
-        # print(os.path.join(self.root,'rsm',item["label"]))
-        label = self.convert_label(label)
-
-        image, label = self.gen_sample(image, label, 
-                                self.multi_scale, self.flip)
-
-        return image.copy(), label.copy(), np.array(size), name
+        return np.stack(images, axis=0), np.stack(labels, axis=0), np.array(size), name
 
     def multi_scale_inference(self, config, model, image, scales=[1], flip=False):
         batch, _, ori_height, ori_width = image.size()

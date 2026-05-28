@@ -31,10 +31,30 @@ class FullModel(nn.Module):
     self.model = model
     self.loss = loss
 
+  @staticmethod
+  def _flatten_sequence(tensor):
+    if tensor is None:
+      return None
+    if isinstance(tensor, torch.Tensor) and tensor.dim() == 5:
+      b, t, c, h, w = tensor.shape
+      return tensor.view(b * t, c, h, w)
+    return tensor
+
+  @staticmethod
+  def _flatten_label_sequence(label):
+    if label is None:
+      return None
+    if isinstance(label, torch.Tensor) and label.dim() == 4:
+      b, t, h, w = label.shape
+      return label.view(b * t, h, w)
+    return label
+
   def pixel_acc(self, pred, label):
     if isinstance(pred, (list, tuple)):
         output_index = min(config.TEST.OUTPUT_INDEX, len(pred) - 1)
         pred = pred[output_index]
+    pred = self._flatten_sequence(pred)
+    label = self._flatten_label_sequence(label)
     if pred.shape[2] != label.shape[1] or pred.shape[3] != label.shape[2]:
         pred = F.interpolate(pred, size=label.shape[1:], mode="bilinear", align_corners=False)
     _, preds = torch.max(pred, dim=1)
@@ -47,6 +67,17 @@ class FullModel(nn.Module):
 
   def forward(self, inputs, labels, *args, **kwargs):
     outputs = self.model(inputs, *args, **kwargs)
+
+    if isinstance(outputs, tuple) and len(outputs) == 2 and isinstance(outputs[1], tuple):
+      outputs, _ = outputs
+
+    if isinstance(outputs, (list, tuple)):
+      outputs = [self._flatten_sequence(x) for x in outputs]
+    else:
+      outputs = self._flatten_sequence(outputs)
+
+    labels = self._flatten_label_sequence(labels)
+
     loss = self.loss(outputs, labels)
     acc  = self.pixel_acc(outputs, labels)
     return torch.unsqueeze(loss,0), outputs, acc
