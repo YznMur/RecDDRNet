@@ -47,7 +47,7 @@ RUN apt-get update -o Acquire::Retries=5 && \
 # --------------------------
 # Clone DDRNet repository
 # --------------------------
-RUN git clone https://github.com/chenjun2hao/DDRNet.pytorch.git /DDRNet.pytorch
+RUN git clone https://github.com/chenjun2hao/DDRNet.pytorch.git /home/trainer/RecDDRNet
 
 # --------------------------
 # Install Python dependencies
@@ -95,8 +95,8 @@ RUN if getent group ${GID} >/dev/null; then \
 # --------------------------
 # Fix permissions (CRITICAL)
 # --------------------------
-RUN chown -R ${UID}:${GID} /DDRNet.pytorch && \
-    mkdir -p /home/${USERNAME}/DDRNet.pytorch && \
+RUN chown -R ${UID}:${GID} /home/${USERNAME}/RecDDRNet && \
+    mkdir -p /home/${USERNAME}/RecDDRNet && \
     chown -R ${UID}:${GID} /home/${USERNAME}
 
 # Optional: better default permissions
