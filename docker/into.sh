@@ -1,8 +1,8 @@
 #!/bin/bash
 set -euo pipefail
 
-docker exec --user trainer -it ddrnetpy \
+docker exec --user trainer -it recddrnet \
     /bin/bash -c "
-    cd /home/trainer/DDRNet.pytorch;
+    cd /home/trainer/RecDDRNet;
     nvidia-smi;
     /bin/bash"
