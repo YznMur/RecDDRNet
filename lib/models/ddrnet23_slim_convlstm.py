@@ -81,5 +81,14 @@ def get_seg_model(config):
     if base_name.endswith('_convlstm'):
         base_name = base_name[:-len('_convlstm')]
 
+    # Normalize model naming conventions between configs and module names
+    if not hasattr(models, base_name):
+        if base_name.startswith('ddrnet23_'):
+            base_name = base_name.replace('ddrnet23_', 'ddrnet_23_', 1)
+        elif base_name == 'ddrnet23':
+            base_name = 'ddrnet_23'
+        elif base_name.startswith('ddrnet39'):
+            base_name = base_name.replace('ddrnet39', 'ddrnet_39', 1)
+
     base_model = eval(f'models.{base_name}.get_seg_model')(config)
     return DDRNetConvLSTM(base_model, convlstm_hidden_dim=64)
