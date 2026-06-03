@@ -99,7 +99,7 @@ def main():
     if is_main_process:
         task = Task.init(
             project_name="DDRNet_Segmentation",
-            task_name=f"train_ddrnet_23-slim-rsm_640x480_5classes{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}",
+            task_name=f"train_{config.MODEL.NAME}_{config.DATASET.DATASET}_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}",
             auto_connect_frameworks={
                 "pytorch": True,
                 "tensorboard": True
