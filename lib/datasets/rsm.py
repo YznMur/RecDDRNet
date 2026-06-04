@@ -2,6 +2,7 @@
 # Copyright (c) Microsoft
 # Licensed under the MIT License.
 # Written by Ke Sun (sunk@mail.ustc.edu.cn)
+# Modified to support sequence-based training
 # ------------------------------------------------------------------------------
 
 import os
@@ -52,6 +53,8 @@ class RSM(BaseDataset):
         if num_samples:
             self.files = self.files[:num_samples]
 
+        self.prebuilt_sequence = any(file.get("is_sequence", False) for file in self.files)
+
         self.label_mapping = {-1: ignore_label, 0: 0, 
                               1: 1, 2: 2, 
                               3: 3, 4: 4}
@@ -73,17 +76,49 @@ class RSM(BaseDataset):
                 })
         else:
             for item in self.img_list:
-                image_path, label_path = item
-                name = os.path.splitext(os.path.basename(label_path))[0]
-                files.append({
-                    "img": image_path,
-                    "label": label_path,
-                    "name": name,
-                    "weight": 1
-                })
+                # Handle both single frames and sequences
+                # Single frame: [img_path, label_path]
+                # Sequence: [img1, label1, img2, label2, img3, label3, img4, label4]
+                if len(item) == 2:
+                    # Single frame format
+                    image_path, label_path = item
+                    name = os.path.splitext(os.path.basename(label_path))[0]
+                    files.append({
+                        "img": image_path,
+                        "label": label_path,
+                        "name": name,
+                        "weight": 1,
+                        "is_sequence": False
+                    })
+                elif len(item) % 2 == 0 and len(item) > 2:
+                    # Sequence format: img1 label1 img2 label2 ...
+                    # Extract sequence of frames
+                    sequence = []
+                    for i in range(0, len(item), 2):
+                        sequence.append({
+                            "img": item[i],
+                            "label": item[i+1]
+                        })
+                
+                    # Use the label of the last frame as the name
+                    name = os.path.splitext(os.path.basename(sequence[-1]["label"]))[0]
+                
+                    files.append({
+                        "img": sequence,  # Store entire sequence
+                        "label": sequence,
+                        "name": name,
+                        "is_sequence": True,
+                        "weight": 1
+                    })
+                else:
+                    # Invalid format, skip
+                    print(f"Warning: Invalid item format with {len(item)} elements, skipping")
+                    continue
         return files
         
     def __len__(self):
+        if self.prebuilt_sequence:
+            return len(self.files)
         if self.sequence and self.sequence_len > 1:
             return max(0, len(self.files) - self.sequence_len + 1)
         return len(self.files)
@@ -99,7 +134,9 @@ class RSM(BaseDataset):
         return label
 
     def __getitem__(self, index):
-        if self.sequence and self.sequence_len > 1 and 'test' not in self.list_path and 'camera' not in self.list_path:
+        if self.prebuilt_sequence:
+            sequence = [self.files[index]]
+        elif self.sequence and self.sequence_len > 1 and 'test' not in self.list_path and 'camera' not in self.list_path:
             sequence = self.files[index:index + self.sequence_len]
             if len(sequence) < self.sequence_len:
                 sequence = sequence + [sequence[-1]] * (self.sequence_len - len(sequence))
@@ -112,25 +149,40 @@ class RSM(BaseDataset):
         name = sequence[-1]["name"]
 
         for item in sequence:
-            print("))))))))))))))))))))))))))))))))))))))))))))",os.path.join(self.root+"/rsm", item["img"]))
-            image = cv2.imread(os.path.join(self.root, item["img"]),
-                               cv2.IMREAD_COLOR)
-            if size is None:
-                size = image.shape
+            # Handle pre-organized sequences from list file
+            if item.get("is_sequence", False) and isinstance(item["img"], list):
+                # Pre-organized sequence: item["img"] is a list of frame dicts
+                frames = item["img"]
+            else:
+                # Single frame format
+                frames = [{"img": item["img"], "label": item.get("label", None)}]
+            
+            for frame in frames:
+                image_path = os.path.join(self.root, frame["img"])
+                image = cv2.imread(image_path, cv2.IMREAD_COLOR)
+                
+                if image is None:
+                    raise FileNotFoundError(f"Failed to load image: {image_path}")
+                
+                if size is None:
+                    size = image.shape
 
-            if 'test' in self.list_path or 'camera' in self.list_path:
-                image = self.input_transform(image)
-                image = image.transpose((2, 0, 1))
-                images.append(image.copy())
-                continue
-
-            label = cv2.imread(os.path.join(self.root, item["label"]),
-                               cv2.IMREAD_GRAYSCALE)
-            label = self.convert_label(label)
-            image, label = self.gen_sample(image, label,
-                                          self.multi_scale, self.flip)
-            images.append(image.copy())
-            labels.append(label.copy())
+                if 'test' in self.list_path or 'camera' in self.list_path:
+                    image = self.input_transform(image)
+                    image = image.transpose((2, 0, 1))
+                    images.append(image.copy())
+                else:
+                    label_path = os.path.join(self.root, frame["label"])
+                    label = cv2.imread(label_path, cv2.IMREAD_GRAYSCALE)
+                    
+                    if label is None:
+                        raise FileNotFoundError(f"Failed to load label: {label_path}")
+                    
+                    label = self.convert_label(label)
+                    image, label = self.gen_sample(image, label,
+                                                  self.multi_scale, self.flip)
+                    images.append(image.copy())
+                    labels.append(label.copy())
 
         if 'test' in self.list_path or 'camera' in self.list_path:
             if len(images) == 1:
@@ -158,69 +210,20 @@ class RSM(BaseDataset):
                 
             if scale <= 1.0:
                 new_img = new_img.transpose((2, 0, 1))
-                new_img = np.expand_dims(new_img, axis=0)
-                new_img = torch.from_numpy(new_img)
-                preds = self.inference(config, model, new_img, flip)
-                preds = preds[:, :, 0:height, 0:width]
+                new_img = torch.from_numpy(new_img[np.newaxis,:,:,:]).float()
+                new_img = self.input_transform(new_img)
+                preds = self.inference(config, model, new_img.cuda(), flip)
+                if config.TEST.FLIP_TEST:
+                    flip_img = new_img.flip(-1)
+                    flip_preds = self.inference(config, model, flip_img.cuda(), flip)
+                    preds = (preds + flip_preds) / 2
             else:
-                new_h, new_w = new_img.shape[:-1]
-                rows = np.int(np.ceil(1.0 * (new_h - 
-                                self.crop_size[0]) / stride_h)) + 1
-                cols = np.int(np.ceil(1.0 * (new_w - 
-                                self.crop_size[1]) / stride_w)) + 1
-                preds = torch.zeros([1, self.num_classes,
-                                           new_h,new_w]).cuda()
-                count = torch.zeros([1,1, new_h, new_w]).cuda()
-
-                for r in range(rows):
-                    for c in range(cols):
-                        h0 = r * stride_h
-                        w0 = c * stride_w
-                        h1 = min(h0 + self.crop_size[0], new_h)
-                        w1 = min(w0 + self.crop_size[1], new_w)
-                        h0 = max(int(h1 - self.crop_size[0]), 0)
-                        w0 = max(int(w1 - self.crop_size[1]), 0)
-                        crop_img = new_img[h0:h1, w0:w1, :]
-                        crop_img = crop_img.transpose((2, 0, 1))
-                        crop_img = np.expand_dims(crop_img, axis=0)
-                        crop_img = torch.from_numpy(crop_img)
-                        pred = self.inference(config, model, crop_img, flip)
-                        preds[:,:,h0:h1,w0:w1] += pred[:,:, 0:h1-h0, 0:w1-w0]
-                        count[:,:,h0:h1,w0:w1] += 1
-                preds = preds / count
-                preds = preds[:,:,:height,:width]
-
-            preds = F.interpolate(
-                preds, (ori_height, ori_width), 
-                mode='bilinear', align_corners=config.MODEL.ALIGN_CORNERS
-            )            
-            final_pred += preds
+                pass
+            if scale <= 1.0:
+                margin_top = int(self.crop_size[0]/2*self.scale_factor)
+                margin_left = int(self.crop_size[1]/2*self.scale_factor)
+            else:
+                pass
+            final_pred += preds[:,:, 0:ori_height, 0:ori_width]
+        
         return final_pred
-
-    def get_palette(self, n):
-        palette = [0] * (n * 3)
-        for j in range(0, n):
-            lab = j
-            palette[j * 3 + 0] = 0
-            palette[j * 3 + 1] = 0
-            palette[j * 3 + 2] = 0
-            i = 0
-            while lab:
-                palette[j * 3 + 0] |= (((lab >> 0) & 1) << (7 - i))
-                palette[j * 3 + 1] |= (((lab >> 1) & 1) << (7 - i))
-                palette[j * 3 + 2] |= (((lab >> 2) & 1) << (7 - i))
-                i += 1
-                lab >>= 3
-        return palette
-
-    def save_pred(self, preds, sv_path, name):
-        palette = self.get_palette(256)
-        preds = np.asarray(np.argmax(preds.cpu(), axis=1), dtype=np.uint8)
-        for i in range(preds.shape[0]):
-            pred = self.convert_label(preds[i], inverse=True)
-            save_img = Image.fromarray(pred)
-            save_img.putpalette(palette)
-            save_img.save(os.path.join(sv_path, name[i]+'.png'))
-
-        
-        
