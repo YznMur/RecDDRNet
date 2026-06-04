@@ -10,9 +10,9 @@ PRINT_FREQ: 20
 
 DATASET:
   DATASET: rsm
-  ROOT: 'data/RSM'
-  TRAIN_SET: 'list/rsm/train.lst'
-  TEST_SET: 'list/rsm/val.lst'
+  ROOT: data/RSM
+  TEST_SET: 'list/rsm/val_RSMdataset_v2.lst'
+  TRAIN_SET: 'list/rsm/train_RSMdataset_v2.lst'
   NUM_CLASSES: 5
 
 MODEL:
@@ -29,14 +29,14 @@ LOSS:
 
 TRAIN:
   IMAGE_SIZE:
-  - 1024
-  - 512
+  - 640
+  - 480
   BASE_SIZE: 2048
-  BATCH_SIZE_PER_GPU: 4
+  BATCH_SIZE_PER_GPU: 32
   SHUFFLE: true
   BEGIN_EPOCH: 0
-  END_EPOCH: 200
-  RESUME: false
+  END_EPOCH: 600
+  RESUME: true
   OPTIMIZER: sgd
   LR: 0.01
   WD: 0.0005
@@ -47,17 +47,15 @@ TRAIN:
   DOWNSAMPLERATE: 1
   IGNORE_LABEL: 255
   SCALE_FACTOR: 16
-  SEQUENCE_MODE: true
-  SEQUENCE_LEN: 4
-
 TEST:
   IMAGE_SIZE:
-  - 1024
-  - 512
-  BASE_SIZE: 2048
+  - 640
+  - 480
+  BASE_SIZE: 640
   BATCH_SIZE_PER_GPU: 2
   FLIP_TEST: false
   MULTI_SCALE: false
   SCALE_LIST: [1]
-  MODEL_FILE: ''
+  #0.5,0.75,1.0,1.25,1.5,1.75
+  # MODEL_FILE: "RSM_v2_imagenet_2048_super_classes/rsm/ddrnet23_slim/best.pth"
   OUTPUT_INDEX: 1
