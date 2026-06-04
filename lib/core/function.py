@@ -140,11 +140,14 @@ def validate(config, testloader, model, writer_dict):
     with torch.no_grad():
         for idx, batch in enumerate(testloader):
             image, label, _, _ = batch
-            size = label.size()
             image = image.cuda()
             label = label.long().cuda()
 
             losses, pred, _ = model(image, label)
+            if label.dim() == 4:
+                b, t, h, w = label.size()
+                label = label.view(b * t, h, w)
+            size = label.size()
             if not isinstance(pred, (list, tuple)):
                 pred = [pred]
             for i, x in enumerate(pred):

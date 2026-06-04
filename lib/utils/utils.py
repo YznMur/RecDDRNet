@@ -19,6 +19,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from config import config
+
 class FullModel(nn.Module):
   """
   Distribute the loss on multi-gpu to reduce 

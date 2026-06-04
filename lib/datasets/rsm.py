@@ -46,8 +46,8 @@ class RSM(BaseDataset):
         self.sequence = sequence
         self.sequence_len = max(1, sequence_len)
         
-        file_path = os.path.join(root, list_path)
-        self.img_list = [line.strip().split() for line in open(file_path)]
+        self.list_file = self._resolve_list_file(root, list_path)
+        self.img_list = [line.strip().split() for line in open(self.list_file)]
 
         self.files = self.read_files()
         if num_samples:
@@ -61,8 +61,62 @@ class RSM(BaseDataset):
     
         # self.label_mapping = {i: i for i in range(17)}
         self.class_weights = torch.FloatTensor([1.0, 1.0, 1.0, 1.0, 
-                                        3.0]).cuda()
+                                        3.0])
         # self.class_weights = None
+
+    @staticmethod
+    def _unique_existing_path(candidates):
+        seen = set()
+        checked = []
+        for path in candidates:
+            path = os.path.normpath(path)
+            if path in seen:
+                continue
+            seen.add(path)
+            checked.append(path)
+            if os.path.exists(path):
+                return path, checked
+        return None, checked
+
+    def _resolve_list_file(self, root, list_path):
+        if os.path.isabs(list_path):
+            candidates = [list_path]
+        else:
+            root_parent = os.path.dirname(os.path.normpath(root))
+            candidates = [
+                os.path.join(root, list_path),
+                list_path,
+                os.path.join(root_parent, list_path),
+            ]
+
+        path, checked = self._unique_existing_path(candidates)
+        if path:
+            return path
+
+        raise FileNotFoundError(
+            "Failed to load list file: {}. Checked: {}".format(
+                list_path, ", ".join(checked)
+            )
+        )
+
+    def _resolve_data_file(self, rel_path):
+        if os.path.isabs(rel_path):
+            candidates = [rel_path]
+        else:
+            root_parent = os.path.dirname(os.path.normpath(self.root))
+            candidates = [
+                os.path.join(self.root, rel_path),
+                os.path.join(self.root, "rsm", rel_path),
+                os.path.join(root_parent, "rsm", rel_path),
+                os.path.join("data", "rsm", rel_path),
+                rel_path,
+            ]
+
+        path, checked = self._unique_existing_path(candidates)
+        if path:
+            return path, checked
+
+        return os.path.normpath(os.path.join(self.root, rel_path)), checked
         
     def read_files(self):
         files = []
@@ -158,11 +212,15 @@ class RSM(BaseDataset):
                 frames = [{"img": item["img"], "label": item.get("label", None)}]
             
             for frame in frames:
-                image_path = os.path.join(self.root, frame["img"])
+                image_path, checked_image_paths = self._resolve_data_file(frame["img"])
                 image = cv2.imread(image_path, cv2.IMREAD_COLOR)
                 
                 if image is None:
-                    raise FileNotFoundError(f"Failed to load image: {image_path}")
+                    raise FileNotFoundError(
+                        "Failed to load image: {}. Checked: {}".format(
+                            frame["img"], ", ".join(checked_image_paths)
+                        )
+                    )
                 
                 if size is None:
                     size = image.shape
@@ -172,11 +230,15 @@ class RSM(BaseDataset):
                     image = image.transpose((2, 0, 1))
                     images.append(image.copy())
                 else:
-                    label_path = os.path.join(self.root, frame["label"])
+                    label_path, checked_label_paths = self._resolve_data_file(frame["label"])
                     label = cv2.imread(label_path, cv2.IMREAD_GRAYSCALE)
                     
                     if label is None:
-                        raise FileNotFoundError(f"Failed to load label: {label_path}")
+                        raise FileNotFoundError(
+                            "Failed to load label: {}. Checked: {}".format(
+                                frame["label"], ", ".join(checked_label_paths)
+                            )
+                        )
                     
                     label = self.convert_label(label)
                     image, label = self.gen_sample(image, label,

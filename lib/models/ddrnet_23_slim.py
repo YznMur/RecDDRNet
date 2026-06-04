@@ -311,7 +311,13 @@ class DualResNet(nn.Module):
             for t in range(x.size(1)):
                 out, hidden = self._forward_frame(x[:, t], hidden)
                 outputs.append(out)
-            outputs = torch.stack(outputs, dim=1)
+            if isinstance(outputs[0], (list, tuple)):
+                outputs = [
+                    torch.stack([frame_outputs[i] for frame_outputs in outputs], dim=1)
+                    for i in range(len(outputs[0]))
+                ]
+            else:
+                outputs = torch.stack(outputs, dim=1)
             if return_hidden:
                 return outputs, hidden
             return outputs
@@ -327,7 +333,13 @@ class DualResNet(nn.Module):
             outputs = []
             for t in range(x.size(1)):
                 outputs.append(self._forward_frame(x[:, t])[0])
-            outputs = torch.stack(outputs, dim=1)
+            if isinstance(outputs[0], (list, tuple)):
+                outputs = [
+                    torch.stack([frame_outputs[i] for frame_outputs in outputs], dim=1)
+                    for i in range(len(outputs[0]))
+                ]
+            else:
+                outputs = torch.stack(outputs, dim=1)
             if return_hidden:
                 return outputs, None
             return outputs
