@@ -17,17 +17,22 @@ def group_by_video(lines):
     """Group frames by video/job."""
     videos = {}
     for line in lines:
-        parts = line.strip().split('\t')
+        parts = line.strip().split()
         if len(parts) != 2:
             continue
         
         img_path = parts[0]
         label_path = parts[1]
         
-        # Extract video ID from filename
-        # e.g., "job_1015__frame_000000_..." -> "job_1015"
+        # Extract video ID from filename.
+        # e.g. "job_1015__frame_000000_..." or "job_2685__0_..." -> "job_1015"
         img_name = os.path.basename(img_path)
-        video_id = img_name.split('__frame_')[0] if '__frame_' in img_name else 'unknown'
+        if '__frame_' in img_name:
+            video_id = img_name.split('__frame_')[0]
+        elif '__' in img_name:
+            video_id = img_name.split('__')[0]
+        else:
+            video_id = os.path.splitext(img_name)[0]
         
         if video_id not in videos:
             videos[video_id] = []
@@ -51,7 +56,7 @@ def create_sequences(videos, seq_len=SEQUENCE_LEN):
                 continue
             
             # Flatten sequence: img1 label1 img2 label2 ...
-            seq_line = ' '.join([f"{img}\t{label}" for img, label in seq])
+            seq_line = ' '.join([f"{img} {label}" for img, label in seq])
             sequences.append(seq_line)
     
     return sequences
@@ -103,7 +108,7 @@ def main():
                         help='Output sequence list file')
     parser.add_argument('--all', action='store_true',
                         help='Process train, val, and test lists automatically')
-    parser.add_argument('--dir', default='/home/yazan/RecDDRNet/lists',
+    parser.add_argument('--dir', default='data/list/rsm',
                         help='Directory containing train/val/test list files')
 
     args = parser.parse_args()
