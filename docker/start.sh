@@ -28,12 +28,12 @@ docker_args=(
     --shm-size=45g
     --name recddrnet
     -v "$workspace_dir/":/home/trainer/RecDDRNet/:rw
-    -v /home/ymurhij/datasets/RSMcityscapes_4_superclasses_v2:/home/trainer/RecDDRNet/data/rsm:rw
+    -v /home/ymurhij/datasets/RSMcityscapes_5_superclasses_v3:/home/trainer/RecDDRNet/data/rsm:rw
     -v /home/ymurhij/datasets/Cityscapes:/home/trainer/RecDDRNet/data/cityscapes:rw
-    -v /home/ymurhij/preprocess/data/output:/home/trainer/data/video:rw
     -v /home/ymurhij/.clearml/clearml.conf:/home/trainer/.clearml/clearml.conf:rw
     -v /home/ymurhij/.clearml:/home/trainer/.clearml
     -w /home/trainer/RecDDRNet
+    # -v /home/ymurhij/preprocess/data/output:/home/trainer/data/video:rw
 )
 
 # Allow X11 access only when a display is available

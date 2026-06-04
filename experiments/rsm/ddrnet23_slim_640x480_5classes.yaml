@@ -3,21 +3,21 @@ CUDNN:
   DETERMINISTIC: false
   ENABLED: true
 GPUS: (0,)
-OUTPUT_DIR: 'RSM_v2_rsm_640x480_5_super_classes_weighted_CombinedLoss'
+OUTPUT_DIR: 'rsm_ddrnet23slim_convlstm'
 LOG_DIR: 'log'
 WORKERS: 8
 PRINT_FREQ: 10
 
 DATASET:
   DATASET: rsm
-  ROOT: data/
-  TEST_SET: 'list/rsm/t.lst'
+  ROOT: data
+  TEST_SET: 'list/rsm/val_RSMdataset_v2.lst'
   TRAIN_SET: 'list/rsm/train_RSMdataset_v2.lst'
   NUM_CLASSES: 5
 MODEL:
   NAME: ddrnet_23_slim
   NUM_OUTPUTS: 2
-  PRETRAINED: "cityscapes_ddrnet23_slim_640x480/cityscapes/ddrnet23_slim_640x480/checkpoint.pth.tar"
+  PRETRAINED: "runs/cityscapes_ddrnet23_slim_640x480/cityscapes/ddrnet23_slim_640x480/checkpoint.pth.tar"
   ALIGN_CORNERS: false
 LOSS:
   USE_OHEM: true

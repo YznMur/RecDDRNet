@@ -112,6 +112,7 @@ class RSM(BaseDataset):
         name = sequence[-1]["name"]
 
         for item in sequence:
+            print("))))))))))))))))))))))))))))))))))))))))))))",os.path.join(self.root+"/rsm", item["img"]))
             image = cv2.imread(os.path.join(self.root, item["img"]),
                                cv2.IMREAD_COLOR)
             if size is None:
