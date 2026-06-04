@@ -6,6 +6,7 @@
 # ------------------------------------------------------------------------------
 
 import os
+import random
 
 import cv2
 import numpy as np
@@ -201,6 +202,15 @@ class RSM(BaseDataset):
         labels = []
         size = None
         name = sequence[-1]["name"]
+        sequence_frame_count = 0
+        for item in sequence:
+            if item.get("is_sequence", False) and isinstance(item["img"], list):
+                sequence_frame_count += len(item["img"])
+            else:
+                sequence_frame_count += 1
+
+        sequence_aug_state = random.getstate() if sequence_frame_count > 1 else None
+        sequence_np_aug_state = np.random.get_state() if sequence_frame_count > 1 else None
 
         for item in sequence:
             # Handle pre-organized sequences from list file
@@ -241,6 +251,9 @@ class RSM(BaseDataset):
                         )
                     
                     label = self.convert_label(label)
+                    if sequence_aug_state is not None:
+                        random.setstate(sequence_aug_state)
+                        np.random.set_state(sequence_np_aug_state)
                     image, label = self.gen_sample(image, label,
                                                   self.multi_scale, self.flip)
                     images.append(image.copy())

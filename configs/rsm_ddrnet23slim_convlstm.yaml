@@ -18,21 +18,21 @@ DATASET:
 MODEL:
   NAME: ddrnet_23_slim
   NUM_OUTPUTS: 2
-  PRETRAINED: 'pretrained_models/DDRNet23s_imagenet.pth'
+  PRETRAINED: "runs/cityscapes_ddrnet23_slim_640x480/cityscapes/ddrnet23_slim_640x480/checkpoint.pth.tar"
   ALIGN_CORNERS: false
   USE_CONVLSTM: true
   CONVLSTM_HIDDEN_DIM: 128
 
 LOSS:
   USE_OHEM: false
-  BALANCE_WEIGHTS: [1.0, 1.0, 1.0, 1.0, 1.0]
+  BALANCE_WEIGHTS: [1.0, 0.4]
 
 TRAIN:
   IMAGE_SIZE:
   - 640
   - 480
   BASE_SIZE: 2048
-  BATCH_SIZE_PER_GPU: 2
+  BATCH_SIZE_PER_GPU: 4
   SHUFFLE: true
   BEGIN_EPOCH: 0
   END_EPOCH: 600
