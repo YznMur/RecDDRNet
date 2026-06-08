@@ -3,7 +3,7 @@ CUDNN:
   DETERMINISTIC: false
   ENABLED: true
 GPUS: (0,)
-OUTPUT_DIR: 'rsm_ddrnet23slim_convlstm'
+OUTPUT_DIR: 'runs/rsm_ddrnet23slim_convlstm__seq30'
 LOG_DIR: 'log'
 WORKERS: 4
 PRINT_FREQ: 20
@@ -11,8 +11,8 @@ PRINT_FREQ: 20
 DATASET:
   DATASET: rsm
   ROOT: data/
-  TEST_SET: 'list/rsm/val_RSMdataset_v2_seq15.lst'
-  TRAIN_SET: 'list/rsm/train_RSMdataset_v2_seq15.lst'
+  TEST_SET: 'list/rsm/val_RSMdataset_v2_seq30.lst'
+  TRAIN_SET: 'list/rsm/train_RSMdataset_v2_seq30.lst'
   NUM_CLASSES: 5
 
 MODEL:
@@ -24,7 +24,7 @@ MODEL:
   CONVLSTM_HIDDEN_DIM: 128
 
 LOSS:
-  USE_OHEM: false
+  USE_OHEM: true
   BALANCE_WEIGHTS: [1.0, 0.4]
 
 TRAIN:
@@ -32,13 +32,13 @@ TRAIN:
   - 640
   - 480
   BASE_SIZE: 2048
-  BATCH_SIZE_PER_GPU: 4
+  BATCH_SIZE_PER_GPU: 2
   SHUFFLE: true
   BEGIN_EPOCH: 0
-  END_EPOCH: 600
-  RESUME: true
+  END_EPOCH: 400
+  RESUME: False
   OPTIMIZER: sgd
-  LR: 0.01
+  LR: 0.005
   WD: 0.0005
   MOMENTUM: 0.9
   NESTEROV: false
@@ -47,8 +47,8 @@ TRAIN:
   DOWNSAMPLERATE: 1
   IGNORE_LABEL: 255
   SCALE_FACTOR: 16
-  SEQUENCE_MODE: false
-  SEQUENCE_LEN: 15
+  SEQUENCE_MODE: true
+  SEQUENCE_LEN: 30
 TEST:
   IMAGE_SIZE:
   - 640

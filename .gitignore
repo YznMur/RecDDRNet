@@ -55,11 +55,11 @@ reports/
 imgs/
 figures/
 video/
-
+rsm_ddrnet23slim_convlstm
+rsm_ddrnet23slim_convlstm__seq30
 # Dataset directories
 data/cityscapes/
 data/rsm/
-
 # System files
 .DS_Store
 Thumbs.db

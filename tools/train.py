@@ -98,7 +98,7 @@ def main():
     clearml_logger = None
     if is_main_process:
         task = Task.init(
-            project_name="DDRNet_Segmentation",
+            project_name="RecDDRNet_Segmentation",
             task_name=f"train_{config.MODEL.NAME}_{config.DATASET.DATASET}_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}",
             auto_connect_frameworks={
                 "pytorch": True,
@@ -318,7 +318,7 @@ def main():
 
     best_mIoU = 0
     last_epoch = 0
-    checkpoint_save_interval = 50
+    checkpoint_save_interval = 25
 
     model_state_file = os.path.join(final_output_dir, 'checkpoint.pth.tar')
 
@@ -383,7 +383,7 @@ def main():
                   model,
                   writer_dict)
 
-        if epoch % 10 == 0:
+        if epoch % 5 == 0:
 
             valid_loss, mean_IoU, IoU_array = validate(
                 config,

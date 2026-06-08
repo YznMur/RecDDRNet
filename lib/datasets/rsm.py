@@ -61,7 +61,7 @@ class RSM(BaseDataset):
                               3: 3, 4: 4}
     
         # self.label_mapping = {i: i for i in range(17)}
-        self.class_weights = torch.FloatTensor([1.0, 1.0, 1.0, 1.0, 
+        self.class_weights = torch.FloatTensor([1.0, 1.0, 3.0, 1.0, 
                                         3.0])
         # self.class_weights = None
 
