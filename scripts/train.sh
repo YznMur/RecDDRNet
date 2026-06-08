@@ -8,4 +8,4 @@
 #   --cfg experiments/rsm/ddrnet23_slim_640x480_5classes.yaml
 
 # python tools/eval.py --cfg experiments/rsm/ddrnet23_slim_640x480_5classes.yaml
-python tools/demo.py --cfg experiments/rsm/ddrnet23_slim_640x480_5classes.yaml
+python tools/demo.py --cfg configs/rsm_ddrnet23slim_convlstm.yaml
