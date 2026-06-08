@@ -11,8 +11,8 @@ PRINT_FREQ: 20
 DATASET:
   DATASET: rsm
   ROOT: data/
-  TEST_SET: 'list/rsm/val_RSMdataset_v2.lst'
-  TRAIN_SET: 'list/rsm/train_RSMdataset_v2.lst'
+  TEST_SET: 'list/rsm/val_RSMdataset_v2_seq30.lst'
+  TRAIN_SET: 'list/rsm/train_RSMdataset_v2_seq30.lst'
   NUM_CLASSES: 5
 
 MODEL:
