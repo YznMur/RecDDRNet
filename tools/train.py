@@ -328,6 +328,14 @@ def main():
     best_mIoU = 0
     last_epoch = 0
     checkpoint_save_interval = 50
+    
+    # Early stopping
+    early_stop_counter = 0
+    early_stop_best = 0
+    early_stop_enabled = getattr(config.TRAIN, 'EARLY_STOP', False)
+    early_stop_patience = getattr(config.TRAIN, 'EARLY_STOP_PATIENCE', 20)
+    early_stop_min_delta = getattr(config.TRAIN, 'EARLY_STOP_MIN_DELTA', 0.001)
+    early_stop_metric = getattr(config.TRAIN, 'EARLY_STOP_METRIC', 'mIoU')
 
     model_state_file = os.path.join(final_output_dir, 'checkpoint.pth.tar')
 
@@ -423,6 +431,8 @@ def main():
                 if mean_IoU > best_mIoU:
 
                     best_mIoU = mean_IoU
+                    early_stop_best = mean_IoU
+                    early_stop_counter = 0
 
                     best_model_path = os.path.join(final_output_dir, 'best.pth')
 
@@ -433,6 +443,10 @@ def main():
                             model_path=best_model_path,
                             name="DDRNet_best_model"
                         )
+                else:
+                    if early_stop_enabled:
+                        early_stop_counter += 1
+                        logger.info(f'Early stop counter: {early_stop_counter}/{early_stop_patience}')
 
                 msg = 'Loss: {:.3f}, MeanIU: {: 4.4f}, Best_mIoU: {: 4.4f}'.format(
                             valid_loss, mean_IoU, best_mIoU)
@@ -467,6 +481,12 @@ def main():
                     'state_dict': model.module.state_dict(),
                     'optimizer': optimizer.state_dict(),
                 }, epoch_checkpoint_path)
+
+        if early_stop_enabled and args.local_rank <= 0:
+            if early_stop_counter >= early_stop_patience:
+                logger.info(f'Early stopping triggered after {epoch + 1} epochs. '
+                           f'Best {early_stop_metric}: {early_stop_best:.4f}')
+                break
 
     if args.local_rank <= 0:
 
