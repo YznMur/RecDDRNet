@@ -122,6 +122,12 @@ _C.TRAIN.SHUFFLE = True
 # only using some training samples
 _C.TRAIN.NUM_SAMPLES = 0
 
+# Early stopping
+_C.TRAIN.EARLY_STOP = False
+_C.TRAIN.EARLY_STOP_PATIENCE = 20
+_C.TRAIN.EARLY_STOP_MIN_DELTA = 0.001
+_C.TRAIN.EARLY_STOP_METRIC = 'mIoU'
+
 # testing
 _C.TEST = CN()
 
