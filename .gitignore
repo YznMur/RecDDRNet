@@ -59,7 +59,8 @@ video/
 # Dataset directories
 data/cityscapes/
 data/rsm/
-
+rsm_ddrnet23slim_convlstm
+rsm_ddrnet23slim_convlstm__seq30
 # System files
 .DS_Store
 Thumbs.db
