@@ -2,9 +2,11 @@
 # Copyright (c) Microsoft
 # Licensed under the MIT License.
 # Written by Ke Sun (sunk@mail.ustc.edu.cn)
+# Modified to support sequence-based training
 # ------------------------------------------------------------------------------
 
 import os
+import random
 
 import cv2
 import numpy as np
@@ -27,16 +29,14 @@ class RSM(BaseDataset):
                  base_size=2048, 
                  crop_size=(512, 1024), 
                  downsample_rate=1,
-                 scale_factor=16,
                  sequence=False,
                  sequence_len=1,
+                 scale_factor=16,
                  mean=[0.485, 0.456, 0.406], 
                  std=[0.229, 0.224, 0.225]):
 
         super(RSM, self).__init__(ignore_label, base_size,
                 crop_size, downsample_rate, scale_factor, mean, std,)
-        self.sequence = sequence
-        self.sequence_len = max(1, sequence_len)
 
         self.root = root
         self.list_path = list_path
@@ -44,22 +44,79 @@ class RSM(BaseDataset):
 
         self.multi_scale = multi_scale
         self.flip = flip
+        self.sequence = sequence
+        self.sequence_len = max(1, sequence_len)
         
-        self.img_list = [line.strip().split() for line in open(root+list_path)]
+        self.list_file = self._resolve_list_file(root, list_path)
+        self.img_list = [line.strip().split() for line in open(self.list_file)]
 
         self.files = self.read_files()
         if num_samples:
             self.files = self.files[:num_samples]
 
+        self.prebuilt_sequence = any(file.get("is_sequence", False) for file in self.files)
+
         self.label_mapping = {-1: ignore_label, 0: 0, 
                               1: 1, 2: 2, 
                               3: 3, 4: 4}
     
-        # self.label_mapping = {i: i for i in range(17)}
-        self.class_weights = torch.FloatTensor([1.0, 1.0, 1.0, 1.0, 
-                                        3.0]).cuda()
-        self.sequence_keys = [self._extract_sequence_key(item[0]) for item in self.img_list]
+        self.class_weights = torch.FloatTensor([1.0, 1.0, 3.0, 1.0, 
+                                        3.0])
         # self.class_weights = None
+
+    @staticmethod
+    def _unique_existing_path(candidates):
+        seen = set()
+        checked = []
+        for path in candidates:
+            path = os.path.normpath(path)
+            if path in seen:
+                continue
+            seen.add(path)
+            checked.append(path)
+            if os.path.exists(path):
+                return path, checked
+        return None, checked
+
+    def _resolve_list_file(self, root, list_path):
+        if os.path.isabs(list_path):
+            candidates = [list_path]
+        else:
+            root_parent = os.path.dirname(os.path.normpath(root))
+            candidates = [
+                os.path.join(root, list_path),
+                list_path,
+                os.path.join(root_parent, list_path),
+            ]
+
+        path, checked = self._unique_existing_path(candidates)
+        if path:
+            return path
+
+        raise FileNotFoundError(
+            "Failed to load list file: {}. Checked: {}".format(
+                list_path, ", ".join(checked)
+            )
+        )
+
+    def _resolve_data_file(self, rel_path):
+        if os.path.isabs(rel_path):
+            candidates = [rel_path]
+        else:
+            root_parent = os.path.dirname(os.path.normpath(self.root))
+            candidates = [
+                os.path.join(self.root, rel_path),
+                os.path.join(self.root, "rsm", rel_path),
+                os.path.join(root_parent, "rsm", rel_path),
+                os.path.join("data", "rsm", rel_path),
+                rel_path,
+            ]
+
+        path, checked = self._unique_existing_path(candidates)
+        if path:
+            return path, checked
+
+        return os.path.normpath(os.path.join(self.root, rel_path)), checked
         
     def read_files(self):
         files = []
@@ -73,15 +130,42 @@ class RSM(BaseDataset):
                 })
         else:
             for item in self.img_list:
-                image_path, label_path = item
-                name = os.path.splitext(os.path.basename(label_path))[0]
-                files.append({
-                    "img": image_path,
-                    "label": label_path,
-                    "name": name,
-                    "weight": 1
-                })
+                if len(item) == 2:
+                    image_path, label_path = item
+                    name = os.path.splitext(os.path.basename(label_path))[0]
+                    files.append({
+                        "img": image_path,
+                        "label": label_path,
+                        "name": name,
+                        "weight": 1,
+                        "is_sequence": False
+                    })
+                elif len(item) % 2 == 0 and len(item) > 2:
+                    sequence = []
+                    for i in range(0, len(item), 2):
+                        sequence.append({
+                            "img": item[i],
+                            "label": item[i+1]
+                        })
+                    name = os.path.splitext(os.path.basename(sequence[-1]["label"]))[0]
+                    files.append({
+                        "img": sequence,
+                        "label": sequence,
+                        "name": name,
+                        "is_sequence": True,
+                        "weight": 1
+                    })
+                else:
+                    print(f"Warning: Invalid item format with {len(item)} elements, skipping")
+                    continue
         return files
+
+    def __len__(self):
+        if self.prebuilt_sequence:
+            return len(self.files)
+        if self.sequence and self.sequence_len > 1:
+            return max(0, len(self.files) - self.sequence_len + 1)
+        return len(self.files)
         
     def convert_label(self, label, inverse=False):
         temp = label.copy()
@@ -93,73 +177,83 @@ class RSM(BaseDataset):
                 label[temp == k] = v
         return label
 
-    def _extract_sequence_key(self, img_path):
-        basename = os.path.splitext(os.path.basename(img_path))[0]
-        parts = basename.split('_frame_')
-        return parts[0] if len(parts) > 1 else basename
-
-    def _get_sequence_indices(self, index):
-        if not self.sequence or self.sequence_len <= 1:
-            return [index]
-
-        key = self.sequence_keys[index]
-        start = index - self.sequence_len + 1
-        indices = []
-        for idx in range(start, index + 1):
-            if idx < 0 or self.sequence_keys[idx] != key:
-                if len(indices) > 0:
-                    indices.append(indices[0])
-                else:
-                    indices.append(index)
-            else:
-                indices.append(idx)
-        return indices
-
     def __getitem__(self, index):
-        item = self.files[index]
-        name = item["name"]
-        image = cv2.imread(os.path.join(self.root,'rsm',item["img"]),
-                           cv2.IMREAD_COLOR)
-        size = image.shape
-        # print (image)
-        # image = cv2.resize(image, (2048, 1024), interpolation=cv2.INTER_LINEAR)
+        if self.prebuilt_sequence:
+            sequence = [self.files[index]]
+        elif self.sequence and self.sequence_len > 1 and 'test' not in self.list_path and 'camera' not in self.list_path:
+            sequence = self.files[index:index + self.sequence_len]
+            if len(sequence) < self.sequence_len:
+                sequence = sequence + [sequence[-1]] * (self.sequence_len - len(sequence))
+        else:
+            sequence = [self.files[index]]
+
+        images = []
+        labels = []
+        size = None
+        name = sequence[-1]["name"]
+        sequence_frame_count = 0
+        for item in sequence:
+            if item.get("is_sequence", False) and isinstance(item["img"], list):
+                sequence_frame_count += len(item["img"])
+            else:
+                sequence_frame_count += 1
+
+        sequence_aug_state = random.getstate() if sequence_frame_count > 1 else None
+        sequence_np_aug_state = np.random.get_state() if sequence_frame_count > 1 else None
+
+        for item in sequence:
+            if item.get("is_sequence", False) and isinstance(item["img"], list):
+                frames = item["img"]
+            else:
+                frames = [{"img": item["img"], "label": item.get("label", None)}]
+            
+            for frame in frames:
+                image_path, checked_image_paths = self._resolve_data_file(frame["img"])
+                image = cv2.imread(image_path, cv2.IMREAD_COLOR)
+                
+                if image is None:
+                    raise FileNotFoundError(
+                        "Failed to load image: {}. Checked: {}".format(
+                            frame["img"], ", ".join(checked_image_paths)
+                        )
+                    )
+                
+                if size is None:
+                    size = image.shape
+
+                if 'test' in self.list_path or 'camera' in self.list_path:
+                    image = self.input_transform(image)
+                    image = image.transpose((2, 0, 1))
+                    images.append(image.copy())
+                else:
+                    label_path, checked_label_paths = self._resolve_data_file(frame["label"])
+                    label = cv2.imread(label_path, cv2.IMREAD_GRAYSCALE)
+                    
+                    if label is None:
+                        raise FileNotFoundError(
+                            "Failed to load label: {}. Checked: {}".format(
+                                frame["label"], ", ".join(checked_label_paths)
+                            )
+                        )
+                    
+                    label = self.convert_label(label)
+                    if sequence_aug_state is not None:
+                        random.setstate(sequence_aug_state)
+                        np.random.set_state(sequence_np_aug_state)
+                    image, label = self.gen_sample(image, label,
+                                                  self.multi_scale, self.flip)
+                    images.append(image.copy())
+                    labels.append(label.copy())
 
         if 'test' in self.list_path or 'camera' in self.list_path:
-            # print("*****************************************")
-            # image = cv2.resize(image, (2048, 1024), interpolation=cv2.INTER_LINEAR)
-            image = self.input_transform(image)
-            image = image.transpose((2, 0, 1))
+            if len(images) == 1:
+                return images[0], np.array(size), name
+            return np.stack(images, axis=0), np.array(size), name
 
-            return image.copy(), np.array(size), name
+        if len(images) == 1:
+            return images[0], labels[0], np.array(size), name
 
-        label = cv2.imread(os.path.join(self.root,'rsm',item["label"]),
-                           cv2.IMREAD_GRAYSCALE)
-        # print(os.path.join(self.root,'rsm',item["label"]))
-        label = self.convert_label(label)
-
-        if self.sequence:
-            indices = self._get_sequence_indices(index)
-            images = []
-            labels = []
-            for idx in indices:
-                seq_item = self.files[idx]
-                seq_image = cv2.imread(os.path.join(self.root,'rsm',seq_item['img']),
-                                       cv2.IMREAD_COLOR)
-                seq_label = cv2.imread(os.path.join(self.root,'rsm',seq_item['label']),
-                                       cv2.IMREAD_GRAYSCALE)
-                seq_label = self.convert_label(seq_label)
-                seq_image, seq_label = self.gen_sample(seq_image, seq_label,
-                                                      self.multi_scale, self.flip)
-                images.append(seq_image.copy())
-                labels.append(seq_label.copy())
-            images = np.stack(images, axis=0)
-            labels = np.stack(labels, axis=0)
-            return images.copy(), labels.copy(), np.array(size), name
-
-        image, label = self.gen_sample(image, label, 
-                                self.multi_scale, self.flip)
-
-        return image.copy(), label.copy(), np.array(size), name
+        return np.stack(images, axis=0), np.stack(labels, axis=0), np.array(size), name
 
     def multi_scale_inference(self, config, model, image, scales=[1], flip=False):
         batch, _, ori_height, ori_width = image.size()

@@ -364,6 +364,8 @@ class DualResNet(nn.Module):
         if single_input:
             x = x.unsqueeze(1)
 
+        self.temporal_memory = None
+
         outputs = []
         for t in range(x.size(1)):
             frame = x[:, t]

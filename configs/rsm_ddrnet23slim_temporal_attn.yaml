@@ -1,0 +1,67 @@
+CUDNN:
+  BENCHMARK: true
+  DETERMINISTIC: false
+  ENABLED: true
+GPUS: (0,)
+OUTPUT_DIR: 'runs/rsm_ddrnet23slim_temporal_attn__seq30'
+LOG_DIR: 'log'
+WORKERS: 4
+PRINT_FREQ: 20
+
+DATASET:
+  DATASET: rsm
+  ROOT: data/
+  TEST_SET: 'list/rsm/val_RSMdataset_v2.lst'
+  TRAIN_SET: 'list/rsm/train_RSMdataset_v2.lst'
+  NUM_CLASSES: 5
+
+MODEL:
+  NAME: ddrnet_23_slim
+  NUM_OUTPUTS: 2
+  PRETRAINED: "runs/cityscapes_ddrnet23_slim_640x480/cityscapes/ddrnet23_slim_640x480/checkpoint.pth.tar"
+  ALIGN_CORNERS: false
+  USE_TEMPORAL_ATTENTION: true
+  ATTN_HEADS: 4
+  ATTN_HEAD_DIM: 32
+
+LOSS:
+  USE_OHEM: true
+  BALANCE_WEIGHTS: [1.0, 0.4]
+
+TRAIN:
+  IMAGE_SIZE:
+  - 640
+  - 480
+  BASE_SIZE: 2048
+  BATCH_SIZE_PER_GPU: 2
+  SHUFFLE: true
+  BEGIN_EPOCH: 0
+  END_EPOCH: 400
+  RESUME: false
+  OPTIMIZER: sgd
+  LR: 0.005
+  WD: 0.0005
+  MOMENTUM: 0.9
+  NESTEROV: false
+  FLIP: true
+  MULTI_SCALE: true
+  DOWNSAMPLERATE: 1
+  IGNORE_LABEL: 255
+  SCALE_FACTOR: 16
+  SEQUENCE_MODE: true
+  SEQUENCE_LEN: 30
+  EARLY_STOP: true
+  EARLY_STOP_PATIENCE: 20
+  EARLY_STOP_MIN_DELTA: 0.001
+  EARLY_STOP_METRIC: 'mIoU'
+
+TEST:
+  IMAGE_SIZE:
+  - 640
+  - 480
+  BASE_SIZE: 640
+  BATCH_SIZE_PER_GPU: 1
+  FLIP_TEST: false
+  MULTI_SCALE: false
+  SCALE_LIST: [1]
+  OUTPUT_INDEX: 1
