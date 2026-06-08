@@ -55,6 +55,10 @@ TRAIN:
   DOWNSAMPLERATE: 1
   IGNORE_LABEL: -1
   SCALE_FACTOR: 16   # kept but unused in new random.uniform()
+  EARLY_STOP: true
+  EARLY_STOP_PATIENCE: 20
+  EARLY_STOP_MIN_DELTA: 0.001
+  EARLY_STOP_METRIC: 'mIoU'
 
   # ---------------- AUGMENTATION FLAGS ----------------
   # (Photometric now handled inside dataset script)
