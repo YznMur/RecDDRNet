@@ -138,16 +138,15 @@ def main():
     else:
         device = torch.device('cuda:{}'.format(gpus[0] if gpus else 0))
 
+    # Create logger on ALL ranks (with rank-specific log files)
+    logger, final_output_dir, tb_log_dir = create_logger(
+        config, args.cfg, f'train_rank{args.local_rank}')
+    
     if is_main_process:
-        logger, final_output_dir, tb_log_dir = create_logger(
-            config, args.cfg, 'train')
         writer = SummaryWriter(tb_log_dir)
         logger.info(pprint.pformat(args))
         logger.info(config)
     else:
-        final_output_dir, _ = get_output_paths(config, args.cfg)
-        os.makedirs(final_output_dir, exist_ok=True)
-        logger = logging.getLogger(f"train_rank_{args.local_rank}")
         writer = NullWriter()
 
     writer_dict = {
