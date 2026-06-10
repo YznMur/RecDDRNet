@@ -2,8 +2,8 @@ CUDNN:
   BENCHMARK: true
   DETERMINISTIC: false
   ENABLED: true
-GPUS: (0,)
-OUTPUT_DIR: 'runs/rsm_ddrnet23slim_convlstm__seq30'
+GPUS: (1,)
+OUTPUT_DIR: 'runs/rsm_ddrnet23slim_convlstm_seq8_keyframe4'
 LOG_DIR: 'log'
 WORKERS: 4
 PRINT_FREQ: 20
@@ -11,8 +11,8 @@ PRINT_FREQ: 20
 DATASET:
   DATASET: rsm
   ROOT: data/
-  TEST_SET: 'list/rsm/val_RSMdataset_v2_seq30.lst'
-  TRAIN_SET: 'list/rsm/train_RSMdataset_v2_seq30.lst'
+  TEST_SET: 'list/rsm/val_RSMdataset_v2_seq8.lst'
+  TRAIN_SET: 'list/rsm/train_RSMdataset_v2_seq8.lst'
   NUM_CLASSES: 5
 
 MODEL:
@@ -22,7 +22,7 @@ MODEL:
   ALIGN_CORNERS: false
   USE_CONVLSTM: true
   CONVLSTM_HIDDEN_DIM: 128
-  KEYFRAME_INTERVAL: 5
+  KEYFRAME_INTERVAL: 4
 
 LOSS:
   USE_OHEM: true
@@ -49,7 +49,7 @@ TRAIN:
   IGNORE_LABEL: 255
   SCALE_FACTOR: 16
   SEQUENCE_MODE: true
-  SEQUENCE_LEN: 30
+  SEQUENCE_LEN: 8
   EARLY_STOP: true
   EARLY_STOP_PATIENCE: 20
   EARLY_STOP_MIN_DELTA: 0.001
