@@ -137,6 +137,7 @@ def main():
         )
     else:
         device = torch.device('cuda:{}'.format(gpus[0] if gpus else 0))
+        torch.cuda.set_device(device)
 
     # Create logger on ALL ranks (with rank-specific log files)
     logger, final_output_dir, tb_log_dir = create_logger(
@@ -294,6 +295,7 @@ def main():
             output_device=args.local_rank
         )
     else:
+        model = model.to(device)
         model = nn.DataParallel(model, device_ids=gpus).cuda()
 
     if config.TRAIN.OPTIMIZER == 'sgd':
