@@ -48,7 +48,10 @@ class RSM(BaseDataset):
         self.sequence_len = max(1, sequence_len)
         
         self.list_file = self._resolve_list_file(root, list_path)
-        self.img_list = [line.strip().split() for line in open(self.list_file)]
+        try:
+            self.img_list = [line.strip().split() for line in open(self.list_file, encoding='utf-8')]
+        except UnicodeDecodeError:
+            self.img_list = [line.strip().split() for line in open(self.list_file, encoding='latin-1')]
 
         self.files = self.read_files()
         if num_samples:
