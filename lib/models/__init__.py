@@ -13,4 +13,3 @@ import models.seg_hrnet_ocr
 import models.ddrnet_23_slim
 import models.ddrnet_23
 import models.ddrnet_39
-import models.ddrnet23_slim_convlstm
