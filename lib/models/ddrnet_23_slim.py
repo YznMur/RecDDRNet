@@ -6,6 +6,7 @@ import torch.nn.functional as F
 from torch.nn import init
 from collections import OrderedDict
 from .temporal_attention import TemporalAttentionBlock
+from .modules.feature_updater import FeatureUpdater
 
 BatchNorm2d = nn.BatchNorm2d
 bn_mom = 0.1
@@ -205,15 +206,22 @@ class DualResNet(nn.Module):
 
     def __init__(self, block, layers, num_classes=19, planes=64, spp_planes=128, head_planes=128, augment=True,
                  use_temporal_attention=False, attn_heads=4, attn_head_dim=32,
-                 keyframe_interval=1):
+                 keyframe_interval=1, use_feature_updater=True, updater_channels=64):
         super(DualResNet, self).__init__()
 
         highres_planes = planes * 2
         self.augment = augment
         self.use_temporal_attention = use_temporal_attention
-        self.temporal_memory = None
+        self.use_feature_updater = use_feature_updater
         self.keyframe_interval = max(1, int(keyframe_interval))
-        self._cached_backbone = None
+
+        feature_channels = planes * 4
+        self._feature_channels = feature_channels
+
+        self.temporal_memory = None
+        self._prev_features = None
+        self._prev_frame = None
+        self._frame_count = 0
 
         self.conv1 =  nn.Sequential(
                           nn.Conv2d(3,planes,kernel_size=3, stride=2, padding=1),
@@ -276,6 +284,14 @@ class DualResNet(nn.Module):
         else:
             self.temporal_attention = None
 
+        if self.use_feature_updater:
+            self.feature_updater = FeatureUpdater(
+                feature_channels=feature_channels,
+                hidden_channels=updater_channels,
+            )
+        else:
+            self.feature_updater = None
+
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
                 nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
@@ -284,9 +300,11 @@ class DualResNet(nn.Module):
                 nn.init.constant_(m.bias, 0)
 
 
-    def reset_temporal_memory(self):
+    def reset_temporal_state(self):
         self.temporal_memory = None
-        self._cached_backbone = None
+        self._prev_features = None
+        self._prev_frame = None
+        self._frame_count = 0
 
     def _forward_backbone(self, x):
 
@@ -377,21 +395,43 @@ class DualResNet(nn.Module):
         if single_input:
             x = x.unsqueeze(1)
 
-        self.temporal_memory = None
-        self._cached_backbone = None
+        self.reset_temporal_state()
 
         outputs = []
+        backbone_count = 0
+        updater_count = 0
+
         for t in range(x.size(1)):
             frame = x[:, t]
-            is_keyframe = (t % self.keyframe_interval == 0)
+            is_keyframe = (self._frame_count % self.keyframe_interval == 0)
 
-            if is_keyframe or self._cached_backbone is None:
+            if is_keyframe or self._prev_features is None:
                 x_feat, x_low, temp = self._forward_backbone(frame)
-                self._cached_backbone = (x_feat, x_low, temp)
+                backbone_count += 1
             else:
-                x_feat, x_low, temp = self._cached_backbone
+                if self.use_feature_updater and self.feature_updater is not None:
+                    delta_f = self.feature_updater(self._prev_frame, frame, self._prev_features)
+                    x_feat = self._prev_features + delta_f
+                    updater_count += 1
+                else:
+                    x_feat = self._prev_features
+                x_low = self._prev_x_low
+                temp = self._prev_temp
+
+            if self.use_temporal_attention and self.temporal_attention is not None:
+                x_feat, self.temporal_memory = self.temporal_attention(
+                    x_feat, self.temporal_memory)
 
             outputs.append(self._forward_with_head(x_feat, x_low, temp))
+
+            self._prev_features = x_feat.detach()
+            self._prev_frame = frame.detach()
+            self._prev_x_low = x_low
+            self._prev_temp = temp
+            self._frame_count += 1
+
+        self._backbone_count = backbone_count
+        self._updater_count = updater_count
 
         if self.augment:
             x_extra = [out[0] for out in outputs]
@@ -410,6 +450,8 @@ class DualResNet(nn.Module):
 
 def DualResNet_imagenet(cfg, pretrained=False):
     keyframe_interval = getattr(cfg.MODEL, 'KEYFRAME_INTERVAL', 1)
+    use_feature_updater = getattr(cfg.MODEL, 'USE_FEATURE_UPDATER', True)
+    updater_channels = getattr(cfg.MODEL, 'UPDATER_CHANNELS', 64)
     model = DualResNet(
         BasicBlock,
         [2, 2, 2, 2],
@@ -422,6 +464,8 @@ def DualResNet_imagenet(cfg, pretrained=False):
         attn_heads=cfg.MODEL.ATTN_HEADS,
         attn_head_dim=cfg.MODEL.ATTN_HEAD_DIM,
         keyframe_interval=keyframe_interval,
+        use_feature_updater=use_feature_updater,
+        updater_channels=updater_channels,
     )
     if pretrained:
         pretrained_state = torch.load(cfg.MODEL.PRETRAINED, map_location='cpu') 

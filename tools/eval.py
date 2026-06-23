@@ -171,6 +171,11 @@ def evaluate_sequence(config, model, dataset, logger):
     start = timeit.default_timer()
     valid_loss, mean_IoU, IoU_array = validate(
         config, loader, full_model, writer_dict)
+    elapsed = timeit.default_timer() - start
+
+    raw_model = model.module if hasattr(model, 'module') else model
+    num_sequences = len(dataset)
+    total_frames = sum(len(getattr(raw_model, '_backbone_counts', [0])) or [0] for _ in [0])
 
     class_names = ["Field", "Grass", "Windrow", "Unused_objects", "Obstacles"]
     logger.info('=' * 60)
@@ -182,10 +187,14 @@ def evaluate_sequence(config, model, dataset, logger):
         name = class_names[idx] if idx < len(class_names) else f'class_{idx}'
         logger.info('    {:2d} {:<18s} IoU: {:.4f}'.format(
             idx, name, iou if not np.isnan(iou) else 0.0))
+    keyframe_interval = getattr(config.MODEL, 'KEYFRAME_INTERVAL', 1)
+    if keyframe_interval > 1:
+        logger.info('  Keyframe interval: {}'.format(keyframe_interval))
+        backbone_runs = getattr(raw_model, '_backbone_count', 'N/A')
+        updater_runs = getattr(raw_model, '_updater_count', 'N/A')
+        logger.info('  Last sequence: backbone={}, updater={}'.format(backbone_runs, updater_runs))
+    logger.info('  Time: {:.1f}s ({:.1f}s/sequence)'.format(elapsed, elapsed / max(num_sequences, 1)))
     logger.info('=' * 60)
-
-    end = timeit.default_timer()
-    logger.info('Time: {:.1f}s'.format(end - start))
     return mean_IoU, IoU_array
 
 
