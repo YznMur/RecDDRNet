@@ -3,7 +3,7 @@ CUDNN:
   DETERMINISTIC: false
   ENABLED: true
 GPUS: (0,)
-OUTPUT_DIR: 'runs/rsm_ddrnet23slim_temporal_attn__seq30'
+OUTPUT_DIR: 'runs/rsm_ddrnet23slim_temporal_attn_seq20'
 LOG_DIR: 'log'
 WORKERS: 4
 PRINT_FREQ: 20
@@ -11,8 +11,8 @@ PRINT_FREQ: 20
 DATASET:
   DATASET: rsm
   ROOT: data/
-  TEST_SET: 'list/rsm/val_RSMdataset_v2_seq30.lst'
-  TRAIN_SET: 'list/rsm/train_RSMdataset_v2_seq30.lst'
+  TEST_SET: 'list/rsm/val_RSMdataset_v2_seq20.lst'
+  TRAIN_SET: 'list/rsm/train_RSMdataset_v2_seq20.lst'
   NUM_CLASSES: 5
 
 MODEL:
@@ -49,7 +49,7 @@ TRAIN:
   IGNORE_LABEL: 255
   SCALE_FACTOR: 16
   SEQUENCE_MODE: true
-  SEQUENCE_LEN: 30
+  SEQUENCE_LEN: 20
   EARLY_STOP: true
   EARLY_STOP_PATIENCE: 20
   EARLY_STOP_MIN_DELTA: 0.001
