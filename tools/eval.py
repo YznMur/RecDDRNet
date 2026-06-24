@@ -1,19 +1,12 @@
-# ------------------------------------------------------------------------------
-# Copyright (c) Microsoft
-# Licensed under the MIT License.
-# Written by Ke Sun (sunk@mail.ustc.edu.cn)
-# ------------------------------------------------------------------------------
-
 import argparse
+import json
 import os
 import pprint
-import shutil
 import sys
 
 import logging
 import time
 import timeit
-from pathlib import Path
 
 import numpy as np
 
@@ -37,21 +30,27 @@ SPLIT_MAP = {
     'test': 'TEST_SET',
 }
 
+CLASS_NAMES = ["Field", "Grass", "Windrow", "Unused_objects", "Obstacles"]
+
+
+class _NoOpWriter:
+    def add_scalar(self, *a, **kw): pass
+    def add_scalars(self, *a, **kw): pass
+
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Evaluate segmentation network')
 
     parser.add_argument('--cfg',
                         help='experiment configure file name',
-                        default="experiments/rsm/ddrnet23.yaml",
+                        default="configs/rsm_ddrnet23slim_keyframe_updater_attn.yaml",
                         type=str)
-    parser.add_argument('--split',
-                        help='dataset split to evaluate: train, val, or test',
-                        default='val',
-                        choices=['train', 'val', 'test'],
+    parser.add_argument('--splits',
+                        help='comma-separated splits to evaluate (train,val,test) or "all"',
+                        default='all',
                         type=str)
     parser.add_argument('--model-file',
-                        help='path to model checkpoint (overrides config.TEST.MODEL_FILE)',
+                        help='path to model checkpoint',
                         default=None,
                         type=str)
     parser.add_argument('opts',
@@ -61,7 +60,6 @@ def parse_args():
 
     args = parser.parse_args()
     update_config(config, args)
-
     return args
 
 
@@ -89,7 +87,7 @@ def build_model(config, model_state_file, logger):
     return model
 
 
-def build_dataset(config, list_path, split, logger):
+def build_dataset(config, list_path, logger):
     test_size = (config.TEST.IMAGE_SIZE[1], config.TEST.IMAGE_SIZE[0])
     dataset = eval('datasets.'+config.DATASET.DATASET)(
                         root=config.DATASET.ROOT,
@@ -117,28 +115,18 @@ def evaluate_single_frame(config, model, dataset, logger):
     start = timeit.default_timer()
     mean_IoU, IoU_array, pixel_acc, mean_acc = testval(
         config, dataset, loader, model, sv_pred=False)
+    elapsed = timeit.default_timer() - start
 
-    class_names = ["Field", "Grass", "Windrow", "Unused_objects", "Obstacles"]
-    logger.info('=' * 60)
-    logger.info('Single-frame evaluation results:')
-    logger.info('  Mean IoU:      {:.4f}'.format(mean_IoU))
-    logger.info('  Pixel Accuracy: {:.4f}'.format(pixel_acc))
-    logger.info('  Mean Accuracy:  {:.4f}'.format(mean_acc))
-    logger.info('  Per-class IoU:')
-    for idx, iou in enumerate(IoU_array):
-        name = class_names[idx] if idx < len(class_names) else f'class_{idx}'
-        logger.info('    {:2d} {:<18s} IoU: {:.4f}'.format(
-            idx, name, iou if not np.isnan(iou) else 0.0))
-    logger.info('=' * 60)
-
-    end = timeit.default_timer()
-    logger.info('Time: {:.1f}s'.format(end - start))
-    return mean_IoU, IoU_array, pixel_acc, mean_acc
-
-
-class _NoOpWriter:
-    def add_scalar(self, *a, **kw): pass
-    def add_scalars(self, *a, **kw): pass
+    logger.info('  Time: {:.1f}s'.format(elapsed))
+    return {
+        'mean_iou': float(mean_IoU),
+        'pixel_acc': float(pixel_acc),
+        'mean_acc': float(mean_acc),
+        'iou_per_class': {CLASS_NAMES[i] if i < len(CLASS_NAMES) else 'class_{}'.format(i):
+                          float(iou) if not np.isnan(iou) else 0.0
+                          for i, iou in enumerate(IoU_array)},
+        'time_seconds': elapsed,
+    }
 
 
 def evaluate_sequence(config, model, dataset, logger):
@@ -174,36 +162,94 @@ def evaluate_sequence(config, model, dataset, logger):
     elapsed = timeit.default_timer() - start
 
     raw_model = model.module if hasattr(model, 'module') else model
-    num_sequences = len(dataset)
-    total_frames = sum(len(getattr(raw_model, '_backbone_counts', [0])) or [0] for _ in [0])
-
-    class_names = ["Field", "Grass", "Windrow", "Unused_objects", "Obstacles"]
-    logger.info('=' * 60)
-    logger.info('Sequence evaluation results:')
-    logger.info('  Valid Loss:     {:.4f}'.format(valid_loss))
-    logger.info('  Mean IoU:       {:.4f}'.format(mean_IoU))
-    logger.info('  Per-class IoU:')
-    for idx, iou in enumerate(IoU_array):
-        name = class_names[idx] if idx < len(class_names) else f'class_{idx}'
-        logger.info('    {:2d} {:<18s} IoU: {:.4f}'.format(
-            idx, name, iou if not np.isnan(iou) else 0.0))
     keyframe_interval = getattr(config.MODEL, 'KEYFRAME_INTERVAL', 1)
+    backbone_runs = getattr(raw_model, '_backbone_count', None)
+    updater_runs = getattr(raw_model, '_updater_count', None)
+
     if keyframe_interval > 1:
         logger.info('  Keyframe interval: {}'.format(keyframe_interval))
-        backbone_runs = getattr(raw_model, '_backbone_count', 'N/A')
-        updater_runs = getattr(raw_model, '_updater_count', 'N/A')
         logger.info('  Last sequence: backbone={}, updater={}'.format(backbone_runs, updater_runs))
-    logger.info('  Time: {:.1f}s ({:.1f}s/sequence)'.format(elapsed, elapsed / max(num_sequences, 1)))
+
+    logger.info('  Time: {:.1f}s ({:.1f}s/sequence)'.format(
+        elapsed, elapsed / max(len(dataset), 1)))
+
+    return {
+        'valid_loss': float(valid_loss),
+        'mean_iou': float(mean_IoU),
+        'iou_per_class': {CLASS_NAMES[i] if i < len(CLASS_NAMES) else 'class_{}'.format(i):
+                          float(iou) if not np.isnan(iou) else 0.0
+                          for i, iou in enumerate(IoU_array)},
+        'keyframe_interval': keyframe_interval,
+        'backbone_runs': backbone_runs,
+        'updater_runs': updater_runs,
+        'time_seconds': elapsed,
+    }
+
+
+def run_split(config, model, split, logger):
+    list_path = config.DATASET[SPLIT_MAP[split]]
     logger.info('=' * 60)
-    return mean_IoU, IoU_array
+    logger.info('Evaluating split: {} (list: {})'.format(split, list_path))
+    logger.info('=' * 60)
+
+    dataset = build_dataset(config, list_path, logger)
+    is_sequence = getattr(dataset, 'prebuilt_sequence', False)
+    logger.info('Sequence data: {}'.format(is_sequence))
+
+    if is_sequence:
+        results = evaluate_sequence(config, model, dataset, logger)
+    else:
+        results = evaluate_single_frame(config, model, dataset, logger)
+
+    logger.info('--- {} Results ---'.format(split.upper()))
+    if 'valid_loss' in results:
+        logger.info('  Loss:     {:.4f}'.format(results['valid_loss']))
+    logger.info('  mIoU:     {:.4f}'.format(results['mean_iou']))
+    if 'pixel_acc' in results:
+        logger.info('  PixelAcc: {:.4f}'.format(results['pixel_acc']))
+    for cls_name, cls_iou in results['iou_per_class'].items():
+        logger.info('  {:<18s} IoU: {:.4f}'.format(cls_name, cls_iou))
+
+    return results
+
+
+def save_results(all_results, output_dir, logger):
+    metrics_path = os.path.join(output_dir, 'eval_metrics.json')
+    with open(metrics_path, 'w') as f:
+        json.dump(all_results, f, indent=2)
+    logger.info('Metrics saved to: {}'.format(metrics_path))
+
+    txt_path = os.path.join(output_dir, 'eval_metrics.txt')
+    with open(txt_path, 'w') as f:
+        f.write('DDRNet Evaluation Results\n')
+        f.write('=' * 60 + '\n\n')
+        for split, results in all_results.items():
+            f.write('Split: {}\n'.format(split.upper()))
+            f.write('-' * 40 + '\n')
+            if 'valid_loss' in results:
+                f.write('  Loss:     {:.4f}\n'.format(results['valid_loss']))
+            f.write('  mIoU:     {:.4f}\n'.format(results['mean_iou']))
+            if 'pixel_acc' in results:
+                f.write('  PixelAcc: {:.4f}\n'.format(results['pixel_acc']))
+            if 'mean_acc' in results:
+                f.write('  MeanAcc:  {:.4f}\n'.format(results['mean_acc']))
+            f.write('  Per-class IoU:\n')
+            for cls_name, cls_iou in results['iou_per_class'].items():
+                f.write('    {:<18s} {:.4f}\n'.format(cls_name, cls_iou))
+            if 'keyframe_interval' in results and results['keyframe_interval'] > 1:
+                f.write('  Keyframe interval: {}\n'.format(results['keyframe_interval']))
+                f.write('  Backbone runs: {}, Updater runs: {}\n'.format(
+                    results.get('backbone_runs', 'N/A'),
+                    results.get('updater_runs', 'N/A')))
+            f.write('  Time: {:.1f}s\n\n'.format(results.get('time_seconds', 0)))
+    logger.info('Metrics saved to: {}'.format(txt_path))
 
 
 def main():
     args = parse_args()
-    split = args.split
 
     logger, final_output_dir, _ = create_logger(
-        config, args.cfg, 'eval_{}'.format(split))
+        config, args.cfg, 'eval_all')
 
     logger.info(pprint.pformat(args))
     logger.info(pprint.pformat(config))
@@ -214,24 +260,39 @@ def main():
 
     if args.model_file:
         model_state_file = args.model_file
-    elif config.TEST.MODEL_FILE:
+    elif hasattr(config.TEST, 'MODEL_FILE') and config.TEST.MODEL_FILE:
         model_state_file = config.TEST.MODEL_FILE
     else:
         model_state_file = os.path.join(final_output_dir, 'checkpoint.pth.tar')
 
     model = build_model(config, model_state_file, logger)
 
-    list_path = config.DATASET[SPLIT_MAP[split]]
-    dataset = build_dataset(config, list_path, split, logger)
-
-    logger.info('Evaluating split: {} (list: {})'.format(split, list_path))
-    is_sequence = getattr(dataset, 'prebuilt_sequence', False)
-    logger.info('Sequence data: {}'.format(is_sequence))
-
-    if is_sequence:
-        evaluate_sequence(config, model, dataset, logger)
+    if args.splits == 'all':
+        splits = ['train', 'val', 'test']
     else:
-        evaluate_single_frame(config, model, dataset, logger)
+        splits = [s.strip() for s in args.splits.split(',')]
+
+    all_results = {}
+    for split in splits:
+        try:
+            all_results[split] = run_split(config, model, split, logger)
+        except Exception as e:
+            logger.error('Error evaluating {}: {}'.format(split, e))
+            all_results[split] = {'error': str(e)}
+
+    save_results(all_results, final_output_dir, logger)
+
+    logger.info('')
+    logger.info('=' * 60)
+    logger.info('SUMMARY')
+    logger.info('=' * 60)
+    for split, results in all_results.items():
+        if 'error' in results:
+            logger.info('  {}: ERROR - {}'.format(split.upper(), results['error']))
+        else:
+            logger.info('  {}: mIoU={:.4f}'.format(split.upper(), results['mean_iou']))
+    logger.info('=' * 60)
+    logger.info('Done. Results saved to: {}'.format(final_output_dir))
 
 
 if __name__ == '__main__':
