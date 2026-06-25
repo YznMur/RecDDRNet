@@ -98,7 +98,7 @@ def main():
     clearml_logger = None
     if is_main_process:
         task = Task.init(
-            project_name="DDRNet_Segmentation",
+            project_name="RecDDRNet_Segmentation",
             task_name=f"train_{config.MODEL.NAME}_{config.DATASET.DATASET}_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}",
             auto_connect_frameworks={
                 "pytorch": True,

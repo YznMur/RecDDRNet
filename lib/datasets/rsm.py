@@ -60,8 +60,8 @@ class RSM(BaseDataset):
                               1: 1, 2: 2, 
                               3: 3, 4: 4}
     
-        self.class_weights = torch.FloatTensor([1.0, 1.0, 3.0, 1.0, 
-                                        3.0])
+        self.class_weights = torch.FloatTensor([1.0, 1.0, 5.0, 1.0, 
+                                        5.0])
         # self.class_weights = None
 
     @staticmethod
