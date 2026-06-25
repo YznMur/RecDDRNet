@@ -226,6 +226,9 @@ def save_results(all_results, output_dir, logger):
         for split, results in all_results.items():
             f.write('Split: {}\n'.format(split.upper()))
             f.write('-' * 40 + '\n')
+            if 'error' in results:
+                f.write('  ERROR: {}\n\n'.format(results['error']))
+                continue
             if 'valid_loss' in results:
                 f.write('  Loss:     {:.4f}\n'.format(results['valid_loss']))
             f.write('  mIoU:     {:.4f}\n'.format(results['mean_iou']))
