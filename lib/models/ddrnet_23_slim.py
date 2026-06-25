@@ -204,13 +204,16 @@ class segmenthead(nn.Module):
 class DualResNet(nn.Module):
 
     def __init__(self, block, layers, num_classes=19, planes=64, spp_planes=128, head_planes=128, augment=True,
-                 use_temporal_attention=False, attn_heads=4, attn_head_dim=32):
+                 use_temporal_attention=False, attn_heads=4, attn_head_dim=32,
+                 keyframe_interval=1):
         super(DualResNet, self).__init__()
 
         highres_planes = planes * 2
         self.augment = augment
         self.use_temporal_attention = use_temporal_attention
         self.temporal_memory = None
+        self.keyframe_interval = max(1, int(keyframe_interval))
+        self._cached_backbone = None
 
         self.conv1 =  nn.Sequential(
                           nn.Conv2d(3,planes,kernel_size=3, stride=2, padding=1),
@@ -283,8 +286,9 @@ class DualResNet(nn.Module):
 
     def reset_temporal_memory(self):
         self.temporal_memory = None
+        self._cached_backbone = None
 
-    def _forward_frame(self, x):
+    def _forward_backbone(self, x):
 
         width_output = x.shape[-1] // 8
         height_output = x.shape[-2] // 8
@@ -326,6 +330,12 @@ class DualResNet(nn.Module):
                         size=[height_output, width_output],
                         mode='bilinear')
 
+        if self.augment:
+            return x_, x, temp
+        return x_, x, None
+
+    def _forward_with_head(self, x_, x, temp):
+
         if self.use_temporal_attention and self.temporal_attention is not None:
             x_, self.temporal_memory = self.temporal_attention(
                 x_, self.temporal_memory)
@@ -334,9 +344,12 @@ class DualResNet(nn.Module):
 
         if self.augment:
             x_extra = self.seghead_extra(temp)
-            return [x_extra, x_]
-        else:
-            return x_
+            return x_extra, x_
+        return x_
+
+    def _forward_frame(self, x):
+        x_, x, temp = self._forward_backbone(x)
+        return self._forward_with_head(x_, x, temp)
 
     def _make_layer(self, block, inplanes, planes, blocks, stride=1):
         downsample = None
@@ -365,11 +378,20 @@ class DualResNet(nn.Module):
             x = x.unsqueeze(1)
 
         self.temporal_memory = None
+        self._cached_backbone = None
 
         outputs = []
         for t in range(x.size(1)):
             frame = x[:, t]
-            outputs.append(self._forward_frame(frame))
+            is_keyframe = (t % self.keyframe_interval == 0)
+
+            if is_keyframe or self._cached_backbone is None:
+                x_feat, x_low, temp = self._forward_backbone(frame)
+                self._cached_backbone = (x_feat, x_low, temp)
+            else:
+                x_feat, x_low, temp = self._cached_backbone
+
+            outputs.append(self._forward_with_head(x_feat, x_low, temp))
 
         if self.augment:
             x_extra = [out[0] for out in outputs]
@@ -387,6 +409,7 @@ class DualResNet(nn.Module):
         return outputs
 
 def DualResNet_imagenet(cfg, pretrained=False):
+    keyframe_interval = getattr(cfg.MODEL, 'KEYFRAME_INTERVAL', 1)
     model = DualResNet(
         BasicBlock,
         [2, 2, 2, 2],
@@ -398,6 +421,7 @@ def DualResNet_imagenet(cfg, pretrained=False):
         use_temporal_attention=cfg.MODEL.USE_TEMPORAL_ATTENTION,
         attn_heads=cfg.MODEL.ATTN_HEADS,
         attn_head_dim=cfg.MODEL.ATTN_HEAD_DIM,
+        keyframe_interval=keyframe_interval,
     )
     if pretrained:
         pretrained_state = torch.load(cfg.MODEL.PRETRAINED, map_location='cpu') 
