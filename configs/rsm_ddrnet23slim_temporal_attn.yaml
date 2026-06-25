@@ -3,7 +3,7 @@ CUDNN:
   DETERMINISTIC: false
   ENABLED: true
 GPUS: (0,1)
-OUTPUT_DIR: 'runs/rsm_ddrnet23slim_temporal_attn_seq20'
+OUTPUT_DIR: 'runs/rsm_ddrnet23slim_temporal_attn_seq20_keyframe10'
 LOG_DIR: 'log'
 WORKERS: 4
 PRINT_FREQ: 20
@@ -23,7 +23,7 @@ MODEL:
   USE_TEMPORAL_ATTENTION: true
   ATTN_HEADS: 4
   ATTN_HEAD_DIM: 32
-  KEYFRAME_INTERVAL: 1
+  KEYFRAME_INTERVAL: 10
 
 LOSS:
   USE_OHEM: true
@@ -34,7 +34,7 @@ TRAIN:
   - 640
   - 480
   BASE_SIZE: 2048
-  BATCH_SIZE_PER_GPU: 2
+  BATCH_SIZE_PER_GPU: 4
   SHUFFLE: true
   BEGIN_EPOCH: 0
   END_EPOCH: 400
