@@ -48,10 +48,7 @@ class RSM(BaseDataset):
         self.sequence_len = max(1, sequence_len)
         
         self.list_file = self._resolve_list_file(root, list_path)
-        try:
-            self.img_list = [line.strip().split() for line in open(self.list_file, encoding='utf-8')]
-        except UnicodeDecodeError:
-            self.img_list = [line.strip().split() for line in open(self.list_file, encoding='latin-1')]
+        self.img_list = self._read_list_file(self.list_file)
 
         self.files = self.read_files()
         if num_samples:
@@ -67,6 +64,19 @@ class RSM(BaseDataset):
         self.class_weights = torch.FloatTensor([1.0, 1.0, 3.0, 1.0, 
                                         3.0])
         # self.class_weights = None
+
+    @staticmethod
+    def _read_list_file(filepath):
+        for enc in ('utf-8', 'gbk', 'gb2312', 'latin-1'):
+            try:
+                with open(filepath, encoding=enc) as f:
+                    lines = f.readlines()
+                return [line.strip().split() for line in lines]
+            except (UnicodeDecodeError, UnicodeError):
+                continue
+        with open(filepath, encoding='latin-1', errors='replace') as f:
+            lines = f.readlines()
+        return [line.strip().split() for line in lines]
 
     @staticmethod
     def _unique_existing_path(candidates):
@@ -108,11 +118,16 @@ class RSM(BaseDataset):
             candidates = [rel_path]
         else:
             root_parent = os.path.dirname(os.path.normpath(self.root))
+            basename = os.path.basename(rel_path)
             candidates = [
                 os.path.join(self.root, rel_path),
                 os.path.join(self.root, "rsm", rel_path),
                 os.path.join(root_parent, "rsm", rel_path),
                 os.path.join("data", "rsm", rel_path),
+                os.path.join("data", rel_path),
+                os.path.join(self.root, basename),
+                os.path.join("data", "rsm", basename),
+                os.path.join(self.root, "rsm", basename),
                 rel_path,
             ]
 
