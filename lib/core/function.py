@@ -113,20 +113,22 @@ def train(config, epoch, num_epoch, epoch_iters, base_lr,
             lr = base_lr
 
         if dist.get_rank() == 0:
-            Logger.current_logger().report_scalar(
-                title="Learning Rate",
-                series="Poly LR",
-                value=lr,
-                iteration=global_steps
-            )
-        if i_iter % config.PRINT_FREQ == 0 and dist.get_rank() == 0:
-            msg = 'Epoch: [{}/{}] Iter:[{}/{}], Time: {:.2f}, ' \
-                  'lr: {}, Loss: {:.6f}, Acc:{:.6f}' .format(
-                      epoch, num_epoch, i_iter, epoch_iters,
-                      batch_time.average(), [x['lr'] for x in optimizer.param_groups], ave_loss.average(),
-                      ave_acc.average())
-            logging.info(msg)
+            cl = Logger.current_logger()
+            if cl is not None:
+                cl.report_scalar("Learning Rate", "Poly LR", value=lr, iteration=global_steps)
+            if i_iter % config.PRINT_FREQ == 0:
+                msg = 'Epoch: [{}/{}] Iter:[{}/{}], Time: {:.2f}, ' \
+                      'lr: {}, Loss: {:.6f}, Acc:{:.6f}' .format(
+                          epoch, num_epoch, i_iter, epoch_iters,
+                          batch_time.average(), [x['lr'] for x in optimizer.param_groups], ave_loss.average(),
+                          ave_acc.average())
+                logging.info(msg)
 
+    if dist.get_rank() == 0:
+        cl = Logger.current_logger()
+        if cl is not None:
+            cl.report_scalar("Train", "Loss", value=ave_loss.average(), iteration=epoch)
+            cl.report_scalar("Train", "Acc", value=ave_acc.average(), iteration=epoch)
     writer.add_scalar('train_loss', ave_loss.average(), global_steps)
     writer_dict['train_global_steps'] = global_steps + 1
 
@@ -138,28 +140,38 @@ def validate(config, testloader, model, writer_dict):
     confusion_matrix = np.zeros(
         (config.DATASET.NUM_CLASSES, config.DATASET.NUM_CLASSES, nums))
     with torch.no_grad():
-        for idx, batch in enumerate(testloader):
+        for idx, batch in enumerate(tqdm(testloader, desc='Validating')):
             image, label, _, _ = batch
+            size = label.size()
             image = image.cuda()
             label = label.long().cuda()
 
             losses, pred, _ = model(image, label)
-            if label.dim() == 4:
-                b, t, h, w = label.size()
-                label = label.view(b * t, h, w)
-            size = label.size()
             if not isinstance(pred, (list, tuple)):
                 pred = [pred]
             for i, x in enumerate(pred):
+                label_flat = label
+                flat_size = size
+                if label.dim() == 4 and x.dim() == 4:
+                    B, T = label.shape[0], label.shape[1]
+                    if x.shape[0] == B * T:
+                        label_flat = label.view(B * T, *label.shape[2:])
+                        flat_size = (B * T, *size[-2:])
+                elif x.dim() == 5:
+                    B, T = x.shape[:2]
+                    x = x.view(B * T, *x.shape[2:])
+                    label_flat = label.view(B * T, *label.shape[2:])
+                    flat_size = (B * T, *size[-2:])
+
                 x = F.interpolate(
-                    input=x, size=size[-2:],
+                    input=x, size=flat_size[-2:],
                     mode='bilinear', align_corners=config.MODEL.ALIGN_CORNERS
                 )
 
                 confusion_matrix[..., i] += get_confusion_matrix(
-                    label,
+                    label_flat,
                     x,
-                    size,
+                    flat_size,
                     config.DATASET.NUM_CLASSES,
                     config.TRAIN.IGNORE_LABEL
                 )
@@ -195,6 +207,17 @@ def validate(config, testloader, model, writer_dict):
     global_steps = writer_dict['valid_global_steps']
     writer.add_scalar('valid_loss', ave_loss.average(), global_steps)
     writer.add_scalar('valid_mIoU', selected_mean_IoU, global_steps)
+    if dist.get_rank() == 0:
+        cl = Logger.current_logger()
+        if cl is not None:
+            cl.report_scalar("Validation", "Loss", value=ave_loss.average(), iteration=global_steps)
+            cl.report_scalar("Validation", "mIoU", value=selected_mean_IoU, iteration=global_steps)
+            if selected_IoU_array is not None:
+                for class_idx, class_iou in enumerate(selected_IoU_array):
+                    if not np.isnan(class_iou):
+                        cl.report_scalar("Validation Class IoU", f"Class {class_idx}", value=float(class_iou), iteration=global_steps)
+                    else:
+                        cl.report_scalar("Validation Class IoU", f"Class {class_idx}", value=0.0, iteration=global_steps)
     for class_idx, class_iou in enumerate(selected_IoU_array):
         writer.add_scalar(f'valid_class_iou/class_{class_idx}', class_iou, global_steps)
     writer_dict['valid_global_steps'] = global_steps + 1
