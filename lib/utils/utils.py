@@ -107,11 +107,14 @@ class AverageMeter(object):
         return self.avg
 
 def create_logger(cfg, cfg_name, phase='train'):
+    import torch.distributed as dist
+    rank = dist.get_rank() if dist.is_available() and dist.is_initialized() else 0
+
     root_output_dir = Path(cfg.OUTPUT_DIR)
-    # set up logger
-    if not root_output_dir.exists():
-        print('=> creating {}'.format(root_output_dir))
-        root_output_dir.mkdir()
+    if rank == 0:
+        if not root_output_dir.exists():
+            print('=> creating {}'.format(root_output_dir))
+            root_output_dir.mkdir()
 
     dataset = cfg.DATASET.DATASET
     model = cfg.MODEL.NAME
@@ -119,11 +122,14 @@ def create_logger(cfg, cfg_name, phase='train'):
 
     final_output_dir = root_output_dir / dataset / cfg_name
 
-    print('=> creating {}'.format(final_output_dir))
-    final_output_dir.mkdir(parents=True, exist_ok=True)
+    if rank == 0:
+        print('=> creating {}'.format(final_output_dir))
+        final_output_dir.mkdir(parents=True, exist_ok=True)
+    if dist.is_available() and dist.is_initialized():
+        dist.barrier()
 
     time_str = time.strftime('%Y-%m-%d-%H-%M')
-    log_file = '{}_{}_{}.log'.format(cfg_name, time_str, phase)
+    log_file = '{}_{}_{}_rank{}.log'.format(cfg_name, time_str, phase, rank)
     final_log_file = final_output_dir / log_file
     head = '%(asctime)-15s %(message)s'
     logging.basicConfig(filename=str(final_log_file),
@@ -135,8 +141,9 @@ def create_logger(cfg, cfg_name, phase='train'):
 
     tensorboard_log_dir = Path(cfg.LOG_DIR) / dataset / model / \
             (cfg_name + '_' + time_str)
-    print('=> creating {}'.format(tensorboard_log_dir))
-    tensorboard_log_dir.mkdir(parents=True, exist_ok=True)
+    if rank == 0:
+        print('=> creating {}'.format(tensorboard_log_dir))
+        tensorboard_log_dir.mkdir(parents=True, exist_ok=True)
 
     return logger, str(final_output_dir), str(tensorboard_log_dir)
 
