@@ -177,11 +177,7 @@ def validate(config, testloader, model, writer_dict):
                 )
 
             loss = losses.mean()
-            if dist.is_distributed():
-                reduced_loss = reduce_tensor(loss)
-            else:
-                reduced_loss = loss
-            ave_loss.update(reduced_loss.item())
+            ave_loss.update(loss.item())
 
     if dist.is_distributed():
         confusion_matrix = torch.from_numpy(confusion_matrix).cuda()
