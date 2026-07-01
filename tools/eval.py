@@ -30,6 +30,11 @@ SPLIT_MAP = {
     'test': 'TEST_SET',
 }
 
+# Allow separate test list via EVAL_TEST_SET config key
+SPLIT_TEST_OVERRIDES = {
+    'test': 'EVAL_TEST_SET',
+}
+
 CLASS_NAMES = ["Field", "Grass", "Windrow", "Unused_objects", "Obstacles"]
 
 
@@ -187,7 +192,11 @@ def evaluate_sequence(config, model, dataset, logger):
 
 
 def run_split(config, model, split, logger):
-    list_path = config.DATASET[SPLIT_MAP[split]]
+    override_key = SPLIT_TEST_OVERRIDES.get(split)
+    if override_key and hasattr(config.DATASET, override_key):
+        list_path = getattr(config.DATASET, override_key)
+    else:
+        list_path = config.DATASET[SPLIT_MAP[split]]
     logger.info('=' * 60)
     logger.info('Evaluating split: {} (list: {})'.format(split, list_path))
     logger.info('=' * 60)
