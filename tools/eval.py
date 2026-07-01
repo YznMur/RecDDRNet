@@ -94,7 +94,7 @@ def build_model(config, model_state_file, logger):
 
 def build_dataset(config, list_path, logger):
     test_size = (config.TEST.IMAGE_SIZE[1], config.TEST.IMAGE_SIZE[0])
-    dataset = eval('datasets.'+config.DATASET.DATASET)(
+    dataset_kwargs = dict(
                         root=config.DATASET.ROOT,
                         list_path=list_path,
                         num_samples=None,
@@ -105,6 +105,10 @@ def build_dataset(config, list_path, logger):
                         base_size=config.TEST.BASE_SIZE,
                         crop_size=test_size,
                         downsample_rate=1)
+    if config.DATASET.DATASET == 'rsm':
+        dataset_kwargs['sequence'] = config.TRAIN.SEQUENCE_MODE
+        dataset_kwargs['sequence_len'] = config.TRAIN.SEQUENCE_LEN
+    dataset = eval('datasets.'+config.DATASET.DATASET)(**dataset_kwargs)
     logger.info('=> dataset: {} samples from {}'.format(len(dataset), list_path))
     return dataset
 
