@@ -139,52 +139,76 @@ def validate(config, testloader, model, writer_dict):
     eval_index = min(config.TEST.OUTPUT_INDEX, nums - 1) if nums > 1 else 0
     confusion_matrix = np.zeros(
         (config.DATASET.NUM_CLASSES, config.DATASET.NUM_CLASSES, nums))
+    has_label = True
     with torch.no_grad():
         for idx, batch in enumerate(testloader):
-            image, label, _, _ = batch
-            size = label.size()
-            image = image.cuda()
-            label = label.long().cuda()
+            if len(batch) == 4:
+                image, label, _, _ = batch
+                size = label.size()
+                image = image.cuda()
+                label = label.long().cuda()
+            elif len(batch) == 3:
+                image, _, _ = batch
+                image = image.cuda()
+                has_label = False
+                label = None
+                size = None
+            else:
+                image = batch[0].cuda()
+                has_label = False
+                label = None
+                size = None
 
-            losses, pred, _ = model(image, label)
+            if has_label:
+                losses, pred, _ = model(image, label)
+            else:
+                raw_model = model.module if hasattr(model, 'module') else model.model
+                pred = raw_model(image)
+                losses = torch.tensor(0.0)
             if not isinstance(pred, (list, tuple)):
                 pred = [pred]
-            for i, x in enumerate(pred):
-                label_flat = label
-                flat_size = size
-                if label.dim() == 4 and x.dim() == 4:
-                    B, T = label.shape[0], label.shape[1]
-                    if x.shape[0] == B * T:
+
+            if has_label:
+                for i, x in enumerate(pred):
+                    label_flat = label
+                    flat_size = size
+                    if label.dim() == 4 and x.dim() == 4:
+                        B, T = label.shape[0], label.shape[1]
+                        if x.shape[0] == B * T:
+                            label_flat = label.view(B * T, *label.shape[2:])
+                            flat_size = (B * T, *size[-2:])
+                    elif x.dim() == 5:
+                        B, T = x.shape[:2]
+                        x = x.view(B * T, *x.shape[2:])
                         label_flat = label.view(B * T, *label.shape[2:])
                         flat_size = (B * T, *size[-2:])
-                elif x.dim() == 5:
-                    B, T = x.shape[:2]
-                    x = x.view(B * T, *x.shape[2:])
-                    label_flat = label.view(B * T, *label.shape[2:])
-                    flat_size = (B * T, *size[-2:])
 
-                x = F.interpolate(
-                    input=x, size=flat_size[-2:],
-                    mode='bilinear', align_corners=config.MODEL.ALIGN_CORNERS
-                )
+                    x = F.interpolate(
+                        input=x, size=flat_size[-2:],
+                        mode='bilinear', align_corners=config.MODEL.ALIGN_CORNERS
+                    )
 
-                confusion_matrix[..., i] += get_confusion_matrix(
-                    label_flat,
-                    x,
-                    flat_size,
-                    config.DATASET.NUM_CLASSES,
-                    config.TRAIN.IGNORE_LABEL
-                )
+                    confusion_matrix[..., i] += get_confusion_matrix(
+                        label_flat,
+                        x,
+                        flat_size,
+                        config.DATASET.NUM_CLASSES,
+                        config.TRAIN.IGNORE_LABEL
+                    )
 
             if idx % 10 == 0:
                 print(idx)
 
-            loss = losses.mean()
-            if dist.is_distributed():
-                reduced_loss = reduce_tensor(loss)
-            else:
-                reduced_loss = loss
-            ave_loss.update(reduced_loss.item())
+            if has_label:
+                loss = losses.mean()
+                if dist.is_distributed():
+                    reduced_loss = reduce_tensor(loss)
+                else:
+                    reduced_loss = loss
+                ave_loss.update(reduced_loss.item())
+
+    if not has_label:
+        logging.info('No labels found — returning inference-only results')
 
     if dist.is_distributed():
         confusion_matrix = torch.from_numpy(confusion_matrix).cuda()
@@ -193,24 +217,29 @@ def validate(config, testloader, model, writer_dict):
 
     selected_mean_IoU = 0.0
     selected_IoU_array = None
-    for i in range(nums):
-        mean_IoU, IoU_array, _, _ = compute_segmentation_metrics(
-            confusion_matrix[..., i]
-        )
-        if dist.get_rank() <= 0:
-            logging.info('{} {} {}'.format(i, IoU_array, mean_IoU))
-        if i == eval_index:
-            selected_mean_IoU = mean_IoU
-            selected_IoU_array = IoU_array
+    if has_label:
+        for i in range(nums):
+            mean_IoU, IoU_array, _, _ = compute_segmentation_metrics(
+                confusion_matrix[..., i]
+            )
+            if dist.get_rank() <= 0:
+                logging.info('{} {} {}'.format(i, IoU_array, mean_IoU))
+            if i == eval_index:
+                selected_mean_IoU = mean_IoU
+                selected_IoU_array = IoU_array
+    else:
+        selected_IoU_array = np.zeros(config.DATASET.NUM_CLASSES)
+
+    avg_loss = ave_loss.average() if has_label else 0.0
 
     writer = writer_dict['writer']
     global_steps = writer_dict['valid_global_steps']
-    writer.add_scalar('valid_loss', ave_loss.average(), global_steps)
+    writer.add_scalar('valid_loss', avg_loss, global_steps)
     writer.add_scalar('valid_mIoU', selected_mean_IoU, global_steps)
     if dist.get_rank() == 0:
         cl = Logger.current_logger()
         if cl is not None:
-            cl.report_scalar("Validation", "Loss", value=ave_loss.average(), iteration=global_steps)
+            cl.report_scalar("Validation", "Loss", value=avg_loss, iteration=global_steps)
             cl.report_scalar("Validation", "mIoU", value=selected_mean_IoU, iteration=global_steps)
             if selected_IoU_array is not None:
                 for class_idx, class_iou in enumerate(selected_IoU_array):
@@ -221,7 +250,7 @@ def validate(config, testloader, model, writer_dict):
     for class_idx, class_iou in enumerate(selected_IoU_array):
         writer.add_scalar(f'valid_class_iou/class_{class_idx}', class_iou, global_steps)
     writer_dict['valid_global_steps'] = global_steps + 1
-    return ave_loss.average(), selected_mean_IoU, selected_IoU_array
+    return avg_loss, selected_mean_IoU, selected_IoU_array
 
 
 def testval(config, test_dataset, testloader, model,
@@ -229,13 +258,30 @@ def testval(config, test_dataset, testloader, model,
     model.eval()
     confusion_matrix = np.zeros(
         (config.DATASET.NUM_CLASSES, config.DATASET.NUM_CLASSES))
+    has_label = True
     with torch.no_grad():
         for index, batch in enumerate(tqdm(testloader)):
-            # print(batch,len(batch))
-            image, label, *rest = batch
-            name = rest[0] if len(rest) > 0 else str(index)
-            border_padding = rest[1] if len(rest) > 1 else None
-            size = label.size()
+            if len(batch) >= 4:
+                image, label, size, name = batch[0], batch[1], batch[2], batch[3]
+                border_padding = batch[4] if len(batch) > 4 else None
+            elif len(batch) == 3:
+                image, size, name = batch
+                has_label = False
+                label = None
+                border_padding = None
+            else:
+                image = batch[0]
+                has_label = False
+                label = None
+                size = None
+                name = str(index)
+                border_padding = None
+
+            if isinstance(size, torch.Tensor):
+                size = size.size()
+            elif isinstance(size, np.ndarray):
+                size = tuple(size.tolist())
+
             pred = test_dataset.multi_scale_inference(
                 config,
                 model,
@@ -246,34 +292,19 @@ def testval(config, test_dataset, testloader, model,
             if border_padding is not None:
                 pred = pred[:, :, 0:pred.size(2) - border_padding[0], 0:pred.size(3) - border_padding[1]]
 
-            if pred.size()[-2] != size[-2] or pred.size()[-1] != size[-1]:
+            if size is not None and (pred.size()[-2] != size[-2] or pred.size()[-1] != size[-1]):
                 pred = F.interpolate(
                     pred, size[-2:],
                     mode='bilinear', align_corners=config.MODEL.ALIGN_CORNERS
                 )
-            
-            # # crf used for post-processing
-            # postprocessor = DenseCRF(   )
-            # # image
-            # mean=[0.485, 0.456, 0.406],
-            # std=[0.229, 0.224, 0.225]
-            # timage = image.squeeze(0)
-            # timage = timage.numpy().copy().transpose((1,2,0))
-            # timage *= std
-            # timage += mean
-            # timage *= 255.0
-            # timage = timage.astype(np.uint8)
-            # # pred
-            # tprob = torch.softmax(pred, dim=1)[0].cpu().numpy()
-            # pred = postprocessor(np.array(timage, dtype=np.uint8), tprob)    
-            # pred = torch.from_numpy(pred).unsqueeze(0)
-            
-            confusion_matrix += get_confusion_matrix(
-                label,
-                pred,
-                size,
-                config.DATASET.NUM_CLASSES,
-                config.TRAIN.IGNORE_LABEL)
+
+            if has_label:
+                confusion_matrix += get_confusion_matrix(
+                    label,
+                    pred,
+                    size,
+                    config.DATASET.NUM_CLASSES,
+                    config.TRAIN.IGNORE_LABEL)
 
             if sv_pred:
                 sv_path = os.path.join(sv_dir, 'test_results')
