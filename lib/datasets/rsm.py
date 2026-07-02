@@ -139,54 +139,45 @@ class RSM(BaseDataset):
         
     def read_files(self):
         files = []
-        if 'test' in self.list_path or 'camera' in self.list_path:
-            for item in self.img_list:
-                image_path = item
-                name = os.path.splitext(os.path.basename(image_path[0]))[0]
+        for item in self.img_list:
+            # Handle both single frames and sequences
+            # Single frame: [img_path, label_path]
+            # Sequence: [img1, label1, img2, label2, img3, label3, img4, label4]
+            if len(item) == 2:
+                # Single frame format
+                image_path, label_path = item
+                name = os.path.splitext(os.path.basename(label_path))[0]
                 files.append({
-                    "img": image_path[0],
+                    "img": image_path,
+                    "label": label_path,
                     "name": name,
+                    "weight": 1,
+                    "is_sequence": False
                 })
-        else:
-            for item in self.img_list:
-                # Handle both single frames and sequences
-                # Single frame: [img_path, label_path]
-                # Sequence: [img1, label1, img2, label2, img3, label3, img4, label4]
-                if len(item) == 2:
-                    # Single frame format
-                    image_path, label_path = item
-                    name = os.path.splitext(os.path.basename(label_path))[0]
-                    files.append({
-                        "img": image_path,
-                        "label": label_path,
-                        "name": name,
-                        "weight": 1,
-                        "is_sequence": False
+            elif len(item) % 2 == 0 and len(item) > 2:
+                # Sequence format: img1 label1 img2 label2 ...
+                # Extract sequence of frames
+                sequence = []
+                for i in range(0, len(item), 2):
+                    sequence.append({
+                        "img": item[i],
+                        "label": item[i+1]
                     })
-                elif len(item) % 2 == 0 and len(item) > 2:
-                    # Sequence format: img1 label1 img2 label2 ...
-                    # Extract sequence of frames
-                    sequence = []
-                    for i in range(0, len(item), 2):
-                        sequence.append({
-                            "img": item[i],
-                            "label": item[i+1]
-                        })
                 
-                    # Use the label of the last frame as the name
-                    name = os.path.splitext(os.path.basename(sequence[-1]["label"]))[0]
-                
-                    files.append({
-                        "img": sequence,  # Store entire sequence
-                        "label": sequence,
-                        "name": name,
-                        "is_sequence": True,
-                        "weight": 1
-                    })
-                else:
-                    # Invalid format, skip
-                    print(f"Warning: Invalid item format with {len(item)} elements, skipping")
-                    continue
+                # Use the label of the last frame as the name
+                name = os.path.splitext(os.path.basename(sequence[-1]["label"]))[0]
+            
+                files.append({
+                    "img": sequence,  # Store entire sequence
+                    "label": sequence,
+                    "name": name,
+                    "is_sequence": True,
+                    "weight": 1
+                })
+            else:
+                # Invalid format, skip
+                print(f"Warning: Invalid item format with {len(item)} elements, skipping")
+                continue
         return files
         
     def __len__(self):
@@ -253,7 +244,7 @@ class RSM(BaseDataset):
                 if size is None:
                     size = image.shape
 
-                if 'test' in self.list_path or 'camera' in self.list_path:
+                if ('test' in self.list_path or 'camera' in self.list_path) and frame.get("label") is None:
                     image = self.input_transform(image)
                     image = image.transpose((2, 0, 1))
                     images.append(image.copy())
@@ -277,15 +268,14 @@ class RSM(BaseDataset):
                     images.append(image.copy())
                     labels.append(label.copy())
 
-        if 'test' in self.list_path or 'camera' in self.list_path:
+        if len(labels) > 0:
             if len(images) == 1:
-                return images[0], np.array(size), name
-            return np.stack(images, axis=0), np.array(size), name
+                return images[0], labels[0], np.array(size), name
+            return np.stack(images, axis=0), np.stack(labels, axis=0), np.array(size), name
 
         if len(images) == 1:
-            return images[0], labels[0], np.array(size), name
-
-        return np.stack(images, axis=0), np.stack(labels, axis=0), np.array(size), name
+            return images[0], np.array(size), name
+        return np.stack(images, axis=0), np.array(size), name
 
     def multi_scale_inference(self, config, model, image, scales=[1], flip=False):
         batch, _, ori_height, ori_width = image.size()
