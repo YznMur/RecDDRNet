@@ -1,28 +1,33 @@
 #!/usr/bin/env python3
-"""Compare eval results from multiple eval_metrics.json files.
+"""Compare eval results and generate a PDF report with charts and tables.
 
 Usage:
-    python scripts/compare_results.py --dir output/
-    python scripts/compare_results.py --dir output/ --csv results.csv --plots results/
-    python scripts/compare_results.py path/to/model1/eval_metrics.json path/to/model2/eval_metrics.json --plots results/
+    python scripts/compare_results.py --dir output/ --pdf report.pdf
+    python scripts/compare_results.py path/to/model1/eval_metrics.json path/to/model2/eval_metrics.json --pdf report.pdf
 """
 
 import argparse
 import json
 import os
 import sys
+from datetime import datetime
 
 try:
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
+    from matplotlib.backends.backend_pdf import PdfPages
+    import matplotlib.gridspec as gridspec
     import numpy as np
     HAS_MPL = True
 except ImportError:
     HAS_MPL = False
+    print("matplotlib not installed. Install with: pip install matplotlib")
+    sys.exit(1)
 
 
 CLASS_NAMES = ["Field", "Grass", "Windrow", "Unused_objects", "Obstacles"]
+CMAP = plt.cm.Set2
 
 
 def load_results(path):
@@ -54,20 +59,295 @@ def get_splits(results):
 
 
 def get_metric(results, split, key, default=None):
-    vals = []
-    for label, data in results:
-        if split in data and key in data[split]:
-            vals.append(data[split][key])
-        else:
-            vals.append(default)
-    return vals
+    return [data[split].get(key, default) if split in data else default for _, data in results]
+
+
+def truncate_label(label, max_len=25):
+    return label if len(label) <= max_len else "..." + label[-(max_len - 3):]
+
+
+def generate_pdf(results, pdf_path):
+    labels = [r[0] for r in results]
+    short_labels = [truncate_label(l) for l in labels]
+    splits = get_splits(results)
+    n_models = len(labels)
+    colors = CMAP(np.linspace(0, 1, max(n_models, 1)))
+
+    with PdfPages(pdf_path) as pdf:
+
+        # ===== PAGE 1: TITLE =====
+        fig = plt.figure(figsize=(11.69, 8.27))
+        fig.patch.set_facecolor("white")
+        plt.axis("off")
+        plt.text(0.5, 0.65, "DDRNet Model Comparison Report", fontsize=28,
+                 fontweight="bold", ha="center", va="center", transform=fig.transFigure)
+        plt.text(0.5, 0.52, f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+                 fontsize=12, ha="center", va="center", color="gray", transform=fig.transFigure)
+        plt.text(0.5, 0.42, f"Models compared: {n_models}", fontsize=14,
+                 ha="center", va="center", transform=fig.transFigure)
+        model_list = "\n".join(f"  {i+1}. {l}" for i, l in enumerate(labels))
+        plt.text(0.5, 0.28, model_list, fontsize=11, ha="center", va="center",
+                 family="monospace", transform=fig.transFigure)
+        pdf.savefig(fig)
+        plt.close()
+
+        # ===== PAGE 2: SUMMARY TABLE =====
+        fig = plt.figure(figsize=(11.69, 8.27))
+        fig.patch.set_facecolor("white")
+        ax = fig.add_subplot(111)
+        ax.axis("off")
+        ax.set_title("Summary - mIoU per Split", fontsize=16, fontweight="bold", pad=20)
+
+        n_rows = len(splits)
+        n_cols = n_models + 1
+        table_data = []
+        for split in splits:
+            row = [split.upper()]
+            for v in get_metric(results, split, "mean_iou"):
+                row.append(f"{v:.4f}" if v is not None else "N/A")
+            table_data.append(row)
+
+        table = ax.table(cellText=table_data,
+                         colLabels=["Split"] + short_labels,
+                         loc="center", cellLoc="center")
+        table.auto_set_font_size(False)
+        table.set_fontsize(10)
+        table.scale(1.2, 1.8)
+
+        for (row, col), cell in table.get_celld().items():
+            if row == 0:
+                cell.set_facecolor("#4472C4")
+                cell.set_text_props(color="white", fontweight="bold")
+            elif col == 0:
+                cell.set_facecolor("#D6E4F0")
+                cell.set_text_props(fontweight="bold")
+            else:
+                cell.set_facecolor("#F2F2F2" if row % 2 == 0 else "white")
+
+        # Best model per split
+        best_text = "Best model per split:\n"
+        for split in splits:
+            best_label, best_miou = None, -1
+            for label, data in results:
+                if split in data and "mean_iou" in data[split]:
+                    if data[split]["mean_iou"] > best_miou:
+                        best_miou = data[split]["mean_iou"]
+                        best_label = label
+            if best_label:
+                best_text += f"  {split:>6s}: {truncate_label(best_label, 30)} (mIoU={best_miou:.4f})\n"
+        plt.text(0.5, 0.08, best_text, fontsize=10, ha="center", va="center",
+                 family="monospace", transform=fig.transFigure,
+                 bbox=dict(boxstyle="round,pad=0.5", facecolor="#E8F4FD", edgecolor="#4472C4"))
+
+        pdf.savefig(fig)
+        plt.close()
+
+        # ===== PAGES 3+: mIoU BAR CHART =====
+        fig = plt.figure(figsize=(11.69, 8.27))
+        fig.patch.set_facecolor("white")
+        fig.suptitle("mIoU Comparison", fontsize=16, fontweight="bold", y=0.95)
+        gs = gridspec.GridSpec(1, len(splits), figure=fig, wspace=0.35)
+        for i, split in enumerate(splits):
+            ax = fig.add_subplot(gs[0, i])
+            mious = get_metric(results, split, "mean_iou", 0)
+            bars = ax.bar(range(n_models), mious, color=colors, edgecolor="black", linewidth=0.5)
+            ax.set_xticks(range(n_models))
+            ax.set_xticklabels(short_labels, rotation=40, ha="right", fontsize=7)
+            ax.set_ylabel("mIoU")
+            ax.set_title(split.upper(), fontsize=12, fontweight="bold")
+            ymax = max(mious) if mious and max(mious) > 0 else 1
+            ax.set_ylim(0, ymax * 1.2)
+            for bar, v in zip(bars, mious):
+                ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + ymax * 0.02,
+                        f"{v:.4f}", ha="center", va="bottom", fontsize=8, fontweight="bold")
+            ax.spines["top"].set_visible(False)
+            ax.spines["right"].set_visible(False)
+        pdf.savefig(fig)
+        plt.close()
+
+        # ===== PAGES: PER-CLASS IOU GROUPED BARS =====
+        for split in splits:
+            fig = plt.figure(figsize=(11.69, 8.27))
+            fig.patch.set_facecolor("white")
+            ax = fig.add_subplot(111)
+            ax.set_title(f"{split.upper()} - Per-Class IoU", fontsize=16, fontweight="bold")
+            x = np.arange(len(CLASS_NAMES))
+            width = 0.8 / n_models
+            for j, (label, data) in enumerate(results):
+                ious = []
+                for cls_name in CLASS_NAMES:
+                    if split in data and "iou_per_class" in data[split]:
+                        v = data[split]["iou_per_class"].get(cls_name, 0)
+                        ious.append(v if isinstance(v, (int, float)) else 0)
+                    else:
+                        ious.append(0)
+                offset = (j - n_models / 2 + 0.5) * width
+                bars = ax.bar(x + offset, ious, width, label=truncate_label(label, 30),
+                              color=colors[j], edgecolor="black", linewidth=0.3)
+                for bar, v in zip(bars, ious):
+                    ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.01,
+                            f"{v:.3f}", ha="center", va="bottom", fontsize=6, rotation=45)
+            ax.set_xticks(x)
+            ax.set_xticklabels(CLASS_NAMES, fontsize=10)
+            ax.set_ylabel("IoU")
+            ax.set_ylim(0, 1.1)
+            ax.legend(fontsize=8, loc="upper right")
+            ax.spines["top"].set_visible(False)
+            ax.spines["right"].set_visible(False)
+            plt.tight_layout()
+            pdf.savefig(fig)
+            plt.close()
+
+        # ===== PAGE: RADAR CHART =====
+        for split in splits:
+            fig = plt.figure(figsize=(8.27, 8.27))
+            fig.patch.set_facecolor("white")
+            ax = fig.add_subplot(111, polar=True)
+            angles = np.linspace(0, 2 * np.pi, len(CLASS_NAMES), endpoint=False).tolist()
+            angles += angles[:1]
+            for j, (label, data) in enumerate(results):
+                ious = []
+                for cls_name in CLASS_NAMES:
+                    if split in data and "iou_per_class" in data[split]:
+                        v = data[split]["iou_per_class"].get(cls_name, 0)
+                        ious.append(v if isinstance(v, (int, float)) else 0)
+                    else:
+                        ious.append(0)
+                ious += ious[:1]
+                ax.plot(angles, ious, "o-", linewidth=2, label=truncate_label(label, 30), color=colors[j])
+                ax.fill(angles, ious, alpha=0.08, color=colors[j])
+            ax.set_xticks(angles[:-1])
+            ax.set_xticklabels(CLASS_NAMES, fontsize=10)
+            ax.set_ylim(0, 1)
+            ax.set_title(f"{split.upper()} - Class IoU Radar", fontsize=14, fontweight="bold", pad=25)
+            ax.legend(fontsize=8, loc="upper right", bbox_to_anchor=(1.35, 1.1))
+            plt.tight_layout()
+            pdf.savefig(fig)
+            plt.close()
+
+        # ===== PAGE: INFERENCE TIME =====
+        fig = plt.figure(figsize=(11.69, 8.27))
+        fig.patch.set_facecolor("white")
+        ax = fig.add_subplot(111)
+        ax.set_title(f"Inference Time ({splits[0].upper() if splits else 'TEST'})",
+                     fontsize=16, fontweight="bold")
+        split = splits[0] if splits else "test"
+        times = get_metric(results, split, "time_seconds", 0)
+        bars = ax.barh(range(n_models), times, color=colors, edgecolor="black", linewidth=0.5)
+        ax.set_yticks(range(n_models))
+        ax.set_yticklabels(short_labels, fontsize=9)
+        ax.set_xlabel("Time (seconds)")
+        for bar, v in zip(bars, times):
+            ax.text(bar.get_width() + max(times) * 0.01 if max(times) > 0 else 0.5,
+                    bar.get_y() + bar.get_height() / 2,
+                    f"{v:.1f}s", ha="left", va="center", fontsize=9, fontweight="bold")
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+        plt.tight_layout()
+        pdf.savefig(fig)
+        plt.close()
+
+        # ===== PAGE: DETAILED TABLE PER SPLIT =====
+        for split in splits:
+            fig = plt.figure(figsize=(11.69, 8.27))
+            fig.patch.set_facecolor("white")
+            ax = fig.add_subplot(111)
+            ax.axis("off")
+            ax.set_title(f"{split.upper()} - Detailed Results", fontsize=16,
+                         fontweight="bold", pad=20)
+
+            header_row = ["Metric"] + short_labels
+            table_data = []
+
+            # mIoU
+            row = ["mIoU"]
+            for v in get_metric(results, split, "mean_iou"):
+                row.append(f"{v:.4f}" if v is not None else "N/A")
+            table_data.append(row)
+
+            # Loss
+            row = ["Loss"]
+            for v in get_metric(results, split, "valid_loss"):
+                row.append(f"{v:.4f}" if v is not None else "N/A")
+            table_data.append(row)
+
+            # Pixel Acc
+            row = ["Pixel Acc"]
+            for v in get_metric(results, split, "pixel_acc"):
+                row.append(f"{v:.4f}" if v is not None else "N/A")
+            table_data.append(row)
+
+            # Per-class IoU
+            for cls_name in CLASS_NAMES:
+                row = [f"  {cls_name}"]
+                for _, data in results:
+                    if split in data and "iou_per_class" in data[split]:
+                        v = data[split]["iou_per_class"].get(cls_name)
+                        row.append(f"{v:.4f}" if v is not None else "N/A")
+                    else:
+                        row.append("N/A")
+                table_data.append(row)
+
+            # Time
+            row = ["Time (s)"]
+            for v in get_metric(results, split, "time_seconds"):
+                row.append(f"{v:.1f}" if v is not None else "N/A")
+            table_data.append(row)
+
+            # Keyframe
+            has_kf = any(
+                split in data and data[split].get("keyframe_interval", 1) > 1
+                for _, data in results
+            )
+            if has_kf:
+                row = ["Keyframe Interval"]
+                for v in get_metric(results, split, "keyframe_interval"):
+                    row.append(str(v) if v is not None else "N/A")
+                table_data.append(row)
+
+                row = ["Backbone Runs"]
+                for v in get_metric(results, split, "backbone_runs"):
+                    row.append(str(v) if v is not None else "N/A")
+                table_data.append(row)
+
+            table = ax.table(cellText=table_data, colLabels=header_row,
+                             loc="center", cellLoc="center")
+            table.auto_set_font_size(False)
+            table.set_fontsize(9)
+            table.scale(1.2, 1.6)
+
+            for (row, col), cell in table.get_celld().items():
+                if row == 0:
+                    cell.set_facecolor("#4472C4")
+                    cell.set_text_props(color="white", fontweight="bold")
+                elif col == 0:
+                    cell.set_facecolor("#D6E4F0")
+                    cell.set_text_props(fontweight="bold")
+                else:
+                    cell.set_facecolor("#F2F2F2" if row % 2 == 0 else "white")
+                    # Highlight max mIoU
+                    if row == 1 and col > 0:
+                        try:
+                            val = float(cell.get_text().get_text())
+                            max_val = max(float(t.get_text().get_text())
+                                         for r2, t in table.get_celld().items()
+                                         if r2 == 1 and r2 == row and col > 0
+                                         and t.get_text().get_text() not in ("N/A", ""))
+                            if val == max_val:
+                                cell.set_facecolor("#92D050")
+                                cell.set_text_props(fontweight="bold")
+                        except (ValueError, AttributeError):
+                            pass
+
+            pdf.savefig(fig)
+            plt.close()
+
+    print(f"PDF report saved to: {pdf_path}")
 
 
 def print_comparison(results):
     if not results:
-        print("No results to compare.")
         return
-
     labels = [r[0] for r in results]
     splits = get_splits(results)
     col_w = max(22, max(len(l) for l in labels) + 2)
@@ -77,202 +357,34 @@ def print_comparison(results):
     print(sep)
     print("COMPARISON REPORT")
     print(sep)
-    print()
-
     for split in splits:
-        print(f"--- {split.upper()} ---")
+        print(f"\n--- {split.upper()} ---")
         print(header)
         print("-" * len(header))
-
-        row = f"{'mIoU':<30s}"
-        for v in get_metric(results, split, "mean_iou"):
-            row += f"{v:>{col_w}.4f}" if v is not None else f"{'N/A':>{col_w}s}"
-        print(row)
-
-        row = f"{'Loss':<30s}"
-        for v in get_metric(results, split, "valid_loss"):
-            row += f"{v:>{col_w}.4f}" if v is not None else f"{'N/A':>{col_w}s}"
-        print(row)
-
-        row = f"{'Pixel Accuracy':<30s}"
-        for v in get_metric(results, split, "pixel_acc"):
-            row += f"{v:>{col_w}.4f}" if v is not None else f"{'N/A':>{col_w}s}"
-        print(row)
-
-        print(f"\n{'Per-Class IoU':<30s}" + "-" * (col_w * len(labels)))
+        for metric_name, metric_key in [("mIoU", "mean_iou"), ("Loss", "valid_loss"),
+                                         ("Pixel Accuracy", "pixel_acc")]:
+            row = f"{metric_name:<30s}"
+            for v in get_metric(results, split, metric_key):
+                row += f"{v:>{col_w}.4f}" if v is not None else f"{'N/A':>{col_w}s}"
+            print(row)
         for cls_name in CLASS_NAMES:
             row = f"  {cls_name:<28s}"
             for _, data in results:
                 if split in data and "iou_per_class" in data[split]:
-                    iou = data[split]["iou_per_class"].get(cls_name)
-                    row += f"{iou:>{col_w}.4f}" if iou is not None else f"{'N/A':>{col_w}s}"
+                    v = data[split]["iou_per_class"].get(cls_name)
+                    row += f"{v:>{col_w}.4f}" if v is not None else f"{'N/A':>{col_w}s}"
                 else:
                     row += f"{'N/A':>{col_w}s}"
             print(row)
-
-        has_kf = any(
-            split in data and data[split].get("keyframe_interval", 1) > 1
-            for _, data in results
-        )
-        if has_kf:
-            row = f"\n{'Keyframe Interval':<30s}"
-            for v in get_metric(results, split, "keyframe_interval"):
-                row += f"{v:>{col_w}d}" if v is not None else f"{'N/A':>{col_w}s}"
-            print(row)
-
-        row = f"{'Time (s)':<30s}"
-        for v in get_metric(results, split, "time_seconds"):
-            row += f"{v:>{col_w}.1f}" if v is not None else f"{'N/A':>{col_w}s}"
-        print(row)
-        print()
-
-    print(sep)
-    print("BEST MODEL PER SPLIT")
-    print(sep)
-    for split in splits:
-        best_label, best_miou = None, -1
-        for label, data in results:
-            if split in data and "mean_iou" in data[split]:
-                if data[split]["mean_iou"] > best_miou:
-                    best_miou = data[split]["mean_iou"]
-                    best_label = label
-        if best_label:
-            print(f"  {split:>6s}: {best_label} (mIoU={best_miou:.4f})")
-        else:
-            print(f"  {split:>6s}: No results")
     print()
 
 
-def save_csv(results, csv_path):
-    splits = get_splits(results)
-    with open(csv_path, "w") as f:
-        cols = ["split", "model"] + CLASS_NAMES + ["mIoU", "loss", "pixel_acc", "time_s"]
-        f.write(",".join(cols) + "\n")
-        for split in splits:
-            for label, data in results:
-                if split not in data or "mean_iou" not in data[split]:
-                    continue
-                row = [split, label]
-                iou_per_class = data[split].get("iou_per_class", {})
-                for cls_name in CLASS_NAMES:
-                    v = iou_per_class.get(cls_name, "")
-                    row.append(f"{v:.4f}" if isinstance(v, (int, float)) else "")
-                row.append(f"{data[split]['mean_iou']:.4f}")
-                row.append(f"{data[split].get('valid_loss', ''):.4f}" if "valid_loss" in data[split] else "")
-                row.append(f"{data[split].get('pixel_acc', ''):.4f}" if "pixel_acc" in data[split] else "")
-                row.append(f"{data[split].get('time_seconds', ''):.1f}" if "time_seconds" in data[split] else "")
-                f.write(",".join(str(v) for v in row) + "\n")
-    print(f"CSV saved to: {csv_path}")
-
-
-def plot_comparison(results, output_dir):
-    if not HAS_MPL:
-        print("matplotlib not installed. Install with: pip install matplotlib")
-        return
-
-    os.makedirs(output_dir, exist_ok=True)
-    labels = [r[0] for r in results]
-    splits = get_splits(results)
-    n_models = len(labels)
-    colors = plt.cm.Set2(np.linspace(0, 1, max(n_models, 1)))
-
-    # 1. mIoU bar chart per split
-    fig, axes = plt.subplots(1, len(splits), figsize=(6 * len(splits), 5), squeeze=False)
-    for i, split in enumerate(splits):
-        ax = axes[0][i]
-        mious = get_metric(results, split, "mean_iou", 0)
-        bars = ax.bar(range(n_models), mious, color=colors, edgecolor="black", linewidth=0.5)
-        ax.set_xticks(range(n_models))
-        ax.set_xticklabels(labels, rotation=30, ha="right", fontsize=8)
-        ax.set_ylabel("mIoU")
-        ax.set_title(f"{split.upper()} - mIoU")
-        ax.set_ylim(0, max(mious) * 1.15 if max(mious) > 0 else 1)
-        for bar, v in zip(bars, mious):
-            ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.005,
-                    f"{v:.4f}", ha="center", va="bottom", fontsize=8)
-    plt.tight_layout()
-    plt.savefig(os.path.join(output_dir, "miou_comparison.png"), dpi=150)
-    plt.close()
-    print(f"Saved: {os.path.join(output_dir, 'miou_comparison.png')}")
-
-    # 2. Per-class IoU grouped bar chart per split
-    for split in splits:
-        fig, ax = plt.subplots(figsize=(10, 5))
-        x = np.arange(len(CLASS_NAMES))
-        width = 0.8 / n_models
-        for j, (label, data) in enumerate(results):
-            ious = []
-            for cls_name in CLASS_NAMES:
-                if split in data and "iou_per_class" in data[split]:
-                    v = data[split]["iou_per_class"].get(cls_name, 0)
-                    ious.append(v if isinstance(v, (int, float)) else 0)
-                else:
-                    ious.append(0)
-            offset = (j - n_models / 2 + 0.5) * width
-            bars = ax.bar(x + offset, ious, width, label=label, color=colors[j],
-                         edgecolor="black", linewidth=0.3)
-        ax.set_xticks(x)
-        ax.set_xticklabels(CLASS_NAMES, rotation=20, ha="right")
-        ax.set_ylabel("IoU")
-        ax.set_title(f"{split.upper()} - Per-Class IoU")
-        ax.set_ylim(0, 1.05)
-        ax.legend(fontsize=7, loc="upper right")
-        plt.tight_layout()
-        fname = f"per_class_iou_{split}.png"
-        plt.savefig(os.path.join(output_dir, fname), dpi=150)
-        plt.close()
-        print(f"Saved: {os.path.join(output_dir, fname)}")
-
-    # 3. Radar/spider chart for best split
-    if splits:
-        split = splits[0]
-        fig, ax = plt.subplots(figsize=(7, 7), subplot_kw=dict(polar=True))
-        angles = np.linspace(0, 2 * np.pi, len(CLASS_NAMES), endpoint=False).tolist()
-        angles += angles[:1]
-        for j, (label, data) in enumerate(results):
-            ious = []
-            for cls_name in CLASS_NAMES:
-                if split in data and "iou_per_class" in data[split]:
-                    v = data[split]["iou_per_class"].get(cls_name, 0)
-                    ious.append(v if isinstance(v, (int, float)) else 0)
-                else:
-                    ious.append(0)
-            ious += ious[:1]
-            ax.plot(angles, ious, "o-", linewidth=2, label=label, color=colors[j])
-            ax.fill(angles, ious, alpha=0.1, color=colors[j])
-        ax.set_xticks(angles[:-1])
-        ax.set_xticklabels(CLASS_NAMES, fontsize=9)
-        ax.set_ylim(0, 1)
-        ax.set_title(f"{split.upper()} - Class IoU Radar", pad=20)
-        ax.legend(fontsize=8, loc="upper right", bbox_to_anchor=(1.3, 1.1))
-        plt.tight_layout()
-        plt.savefig(os.path.join(output_dir, "radar_chart.png"), dpi=150)
-        plt.close()
-        print(f"Saved: {os.path.join(output_dir, 'radar_chart.png')}")
-
-    # 4. Inference time comparison
-    fig, ax = plt.subplots(figsize=(6, 4))
-    times = get_metric(results, splits[0] if splits else "test", "time_seconds", 0)
-    bars = ax.barh(range(n_models), times, color=colors, edgecolor="black", linewidth=0.5)
-    ax.set_yticks(range(n_models))
-    ax.set_yticklabels(labels, fontsize=9)
-    ax.set_xlabel("Time (seconds)")
-    ax.set_title(f"Inference Time ({splits[0].upper() if splits else 'test'})")
-    for bar, v in zip(bars, times):
-        ax.text(bar.get_width() + 0.5, bar.get_y() + bar.get_height() / 2,
-                f"{v:.1f}s", ha="left", va="center", fontsize=8)
-    plt.tight_layout()
-    plt.savefig(os.path.join(output_dir, "inference_time.png"), dpi=150)
-    plt.close()
-    print(f"Saved: {os.path.join(output_dir, 'inference_time.png')}")
-
-
 def main():
-    parser = argparse.ArgumentParser(description="Compare eval results from multiple models")
+    parser = argparse.ArgumentParser(description="Compare eval results - generate PDF report")
     parser.add_argument("files", nargs="*", help="Paths to eval_metrics.json files")
     parser.add_argument("--dir", type=str, help="Directory to recursively search for eval_metrics.json")
-    parser.add_argument("--csv", type=str, help="Save results to CSV file")
-    parser.add_argument("--plots", type=str, help="Directory to save comparison charts")
+    parser.add_argument("--pdf", type=str, default="comparison_report.pdf",
+                        help="Output PDF path (default: comparison_report.pdf)")
     args = parser.parse_args()
 
     json_files = list(args.files)
@@ -298,12 +410,7 @@ def main():
 
     print()
     print_comparison(results)
-
-    if args.csv:
-        save_csv(results, args.csv)
-
-    if args.plots:
-        plot_comparison(results, args.plots)
+    generate_pdf(results, args.pdf)
 
 
 if __name__ == "__main__":
