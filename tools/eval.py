@@ -84,7 +84,7 @@ def build_model(config, model_state_file, logger):
     model.load_state_dict(model_dict)
 
     gpus = list(config.GPUS)
-    model = nn.DataParallel(model, device_ids=gpus).cuda()
+    model = nn.DataParallel(model, device_ids=gpus).cuda(gpus[0])
     return model
 
 
@@ -227,6 +227,9 @@ def save_results(all_results, output_dir, logger):
         for split, results in all_results.items():
             f.write('Split: {}\n'.format(split.upper()))
             f.write('-' * 40 + '\n')
+            if 'error' in results:
+                f.write('  ERROR: {}\n\n'.format(results['error']))
+                continue
             if 'valid_loss' in results:
                 f.write('  Loss:     {:.4f}\n'.format(results['valid_loss']))
             f.write('  mIoU:     {:.4f}\n'.format(results['mean_iou']))
@@ -269,7 +272,7 @@ def main():
     model = build_model(config, model_state_file, logger)
 
     if args.splits == 'all':
-        splits = ['train', 'val', 'test']
+        splits = ['test', 'train', 'val']
     else:
         splits = [s.strip() for s in args.splits.split(',')]
 
