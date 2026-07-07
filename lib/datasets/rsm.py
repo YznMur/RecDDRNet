@@ -120,44 +120,35 @@ class RSM(BaseDataset):
         
     def read_files(self):
         files = []
-        if 'test' in self.list_path or 'camera' in self.list_path:
-            for item in self.img_list:
-                image_path = item
-                name = os.path.splitext(os.path.basename(image_path[0]))[0]
+        for item in self.img_list:
+            if len(item) == 2:
+                image_path, label_path = item
+                name = os.path.splitext(os.path.basename(label_path))[0]
                 files.append({
-                    "img": image_path[0],
+                    "img": image_path,
+                    "label": label_path,
                     "name": name,
+                    "weight": 1,
+                    "is_sequence": False
                 })
-        else:
-            for item in self.img_list:
-                if len(item) == 2:
-                    image_path, label_path = item
-                    name = os.path.splitext(os.path.basename(label_path))[0]
-                    files.append({
-                        "img": image_path,
-                        "label": label_path,
-                        "name": name,
-                        "weight": 1,
-                        "is_sequence": False
+            elif len(item) % 2 == 0 and len(item) > 2:
+                sequence = []
+                for i in range(0, len(item), 2):
+                    sequence.append({
+                        "img": item[i],
+                        "label": item[i+1]
                     })
-                elif len(item) % 2 == 0 and len(item) > 2:
-                    sequence = []
-                    for i in range(0, len(item), 2):
-                        sequence.append({
-                            "img": item[i],
-                            "label": item[i+1]
-                        })
-                    name = os.path.splitext(os.path.basename(sequence[-1]["label"]))[0]
-                    files.append({
-                        "img": sequence,
-                        "label": sequence,
-                        "name": name,
-                        "is_sequence": True,
-                        "weight": 1
-                    })
-                else:
-                    print(f"Warning: Invalid item format with {len(item)} elements, skipping")
-                    continue
+                name = os.path.splitext(os.path.basename(sequence[-1]["label"]))[0]
+                files.append({
+                    "img": sequence,
+                    "label": sequence,
+                    "name": name,
+                    "is_sequence": True,
+                    "weight": 1
+                })
+            else:
+                print(f"Warning: Invalid item format with {len(item)} elements, skipping")
+                continue
         return files
 
     def __len__(self):
@@ -221,7 +212,7 @@ class RSM(BaseDataset):
                 if size is None:
                     size = image.shape
 
-                if 'test' in self.list_path or 'camera' in self.list_path:
+                if ('test' in self.list_path or 'camera' in self.list_path) and frame.get("label") is None:
                     image = self.input_transform(image)
                     image = image.transpose((2, 0, 1))
                     images.append(image.copy())
@@ -245,15 +236,14 @@ class RSM(BaseDataset):
                     images.append(image.copy())
                     labels.append(label.copy())
 
-        if 'test' in self.list_path or 'camera' in self.list_path:
+        if len(labels) > 0:
             if len(images) == 1:
-                return images[0], np.array(size), name
-            return np.stack(images, axis=0), np.array(size), name
+                return images[0], labels[0], np.array(size), name
+            return np.stack(images, axis=0), np.stack(labels, axis=0), np.array(size), name
 
         if len(images) == 1:
-            return images[0], labels[0], np.array(size), name
-
-        return np.stack(images, axis=0), np.stack(labels, axis=0), np.array(size), name
+            return images[0], np.array(size), name
+        return np.stack(images, axis=0), np.array(size), name
 
     def multi_scale_inference(self, config, model, image, scales=[1], flip=False):
         batch, _, ori_height, ori_width = image.size()

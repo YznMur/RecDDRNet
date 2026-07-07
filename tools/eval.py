@@ -7,6 +7,7 @@ import sys
 import logging
 import time
 import timeit
+from tqdm import tqdm
 
 import numpy as np
 

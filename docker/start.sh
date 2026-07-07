@@ -18,7 +18,7 @@ fi
 
 docker_args=(
     -it -d --rm
-    --gpus device=0
+    --gpus all
     --net host
     --user ${USER_ID}:${GROUP_ID}
     -e HOME=/home/trainer
