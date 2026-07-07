@@ -3,7 +3,7 @@ CUDNN:
   DETERMINISTIC: false
   ENABLED: true
 GPUS: (0,)
-OUTPUT_DIR: 'runs/rsm_ddrnet23slim_keyframe_updater_attn'
+OUTPUT_DIR: 'rsm_ddrnet23slim_keyframe_updater_attn_seq20_keyframe_5'
 LOG_DIR: 'log'
 WORKERS: 4
 PRINT_FREQ: 20
@@ -18,7 +18,7 @@ DATASET:
 MODEL:
   NAME: ddrnet_23_slim
   NUM_OUTPUTS: 2
-  PRETRAINED: "runs/cityscapes_ddrnet23_slim_640x480/cityscapes/ddrnet23_slim_640x480/checkpoint.pth.tar"
+  PRETRAINED: "cityscapes_ddrnet23_slim_640x480/cityscapes/ddrnet23_slim_640x480/checkpoint.pth.tar"
   ALIGN_CORNERS: false
   USE_TEMPORAL_ATTENTION: true
   ATTN_HEADS: 4
