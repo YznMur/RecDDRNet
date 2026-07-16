@@ -69,6 +69,8 @@ RUN pip install --no-cache-dir \
     colour-demosaicing \
     colour-science \
     clearml \
+    onnx \
+    onnxruntime \
     numpy==1.19.5
 RUN apt-get update && apt-get install -y openssh-client && rm -rf /var/lib/apt/lists/*
 # --------------------------
