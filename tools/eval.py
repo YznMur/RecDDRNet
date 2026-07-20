@@ -144,7 +144,7 @@ def evaluate_single_frame(config, model, dataset, logger, mask_dir=None):
     }
 
 
-def evaluate_sequence(config, model, dataset, logger):
+def evaluate_sequence(config, model, dataset, logger, mask_dir=None):
     if config.LOSS.USE_OHEM:
         criterion = OhemCrossEntropy(
             ignore_label=config.TRAIN.IGNORE_LABEL,
@@ -173,7 +173,7 @@ def evaluate_sequence(config, model, dataset, logger):
 
     start = timeit.default_timer()
     valid_loss, mean_IoU, IoU_array = validate(
-        config, loader, full_model, writer_dict)
+        config, loader, full_model, writer_dict, mask_dir=mask_dir)
     elapsed = timeit.default_timer() - start
 
     raw_model = model.module if hasattr(model, 'module') else model
@@ -216,7 +216,7 @@ def run_split(config, model, split, logger, mask_dir=None):
     logger.info('Sequence data: {}'.format(is_sequence))
 
     if is_sequence:
-        results = evaluate_sequence(config, model, dataset, logger)
+        results = evaluate_sequence(config, model, dataset, logger, mask_dir=mask_dir)
     else:
         results = evaluate_single_frame(config, model, dataset, logger, mask_dir=mask_dir)
 

@@ -132,7 +132,7 @@ def train(config, epoch, num_epoch, epoch_iters, base_lr,
     writer.add_scalar('train_loss', ave_loss.average(), global_steps)
     writer_dict['train_global_steps'] = global_steps + 1
 
-def validate(config, testloader, model, writer_dict):
+def validate(config, testloader, model, writer_dict, mask_dir=None):
     model.eval()
     ave_loss = AverageMeter()
     nums = config.MODEL.NUM_OUTPUTS
@@ -143,12 +143,12 @@ def validate(config, testloader, model, writer_dict):
     with torch.no_grad():
         for idx, batch in enumerate(testloader):
             if len(batch) == 4:
-                image, label, _, _ = batch
+                image, label, _, name = batch
                 size = label.size()
                 image = image.cuda()
                 label = label.long().cuda()
             elif len(batch) == 3:
-                image, _, _ = batch
+                image, _, name = batch
                 image = image.cuda()
                 has_label = False
                 label = None
@@ -158,6 +158,7 @@ def validate(config, testloader, model, writer_dict):
                 has_label = False
                 label = None
                 size = None
+                name = str(idx)
 
             if has_label:
                 losses, pred, _ = model(image, label)
@@ -167,6 +168,19 @@ def validate(config, testloader, model, writer_dict):
                 losses = torch.tensor(0.0)
             if not isinstance(pred, (list, tuple)):
                 pred = [pred]
+
+            if mask_dir is not None:
+                os.makedirs(mask_dir, exist_ok=True)
+                eval_pred = pred[min(eval_index, len(pred) - 1)]
+                if eval_pred.dim() == 5:
+                    eval_pred = eval_pred[:, -1]
+                elif eval_pred.dim() == 4 and eval_pred.shape[0] > 1:
+                    eval_pred = eval_pred[-1:]
+                _, pred_mask = torch.max(eval_pred, dim=1)
+                pred_mask = pred_mask.squeeze(0).cpu().numpy().astype(np.uint8)
+                img_name = name[0] if isinstance(name, (list, tuple)) else str(name)
+                safe_name = img_name.replace('/', '_').replace('\\', '_')
+                cv2.imwrite(os.path.join(mask_dir, safe_name + '.png'), pred_mask)
 
             if has_label:
                 for i, x in enumerate(pred):
