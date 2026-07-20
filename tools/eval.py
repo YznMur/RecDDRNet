@@ -58,6 +58,12 @@ def parse_args():
                         help='path to model checkpoint',
                         default=None,
                         type=str)
+    parser.add_argument('--save-masks',
+                        action='store_true',
+                        help='save predicted class masks as PNG files')
+    parser.add_argument('--mask-dir',
+                        default=None,
+                        help='directory for saved masks (default: {output_dir}/masks)')
     parser.add_argument('opts',
                         help="Modify config options using the command-line",
                         default=None,
@@ -113,7 +119,7 @@ def build_dataset(config, list_path, logger):
     return dataset
 
 
-def evaluate_single_frame(config, model, dataset, logger):
+def evaluate_single_frame(config, model, dataset, logger, mask_dir=None):
     loader = torch.utils.data.DataLoader(
         dataset,
         batch_size=1,
@@ -123,7 +129,7 @@ def evaluate_single_frame(config, model, dataset, logger):
 
     start = timeit.default_timer()
     mean_IoU, IoU_array, pixel_acc, mean_acc = testval(
-        config, dataset, loader, model, sv_pred=False)
+        config, dataset, loader, model, sv_pred=False, mask_dir=mask_dir)
     elapsed = timeit.default_timer() - start
 
     logger.info('  Time: {:.1f}s'.format(elapsed))
@@ -195,7 +201,7 @@ def evaluate_sequence(config, model, dataset, logger):
     }
 
 
-def run_split(config, model, split, logger):
+def run_split(config, model, split, logger, mask_dir=None):
     override_key = SPLIT_TEST_OVERRIDES.get(split)
     if override_key and hasattr(config.DATASET, override_key):
         list_path = getattr(config.DATASET, override_key)
@@ -212,7 +218,7 @@ def run_split(config, model, split, logger):
     if is_sequence:
         results = evaluate_sequence(config, model, dataset, logger)
     else:
-        results = evaluate_single_frame(config, model, dataset, logger)
+        results = evaluate_single_frame(config, model, dataset, logger, mask_dir=mask_dir)
 
     logger.info('--- {} Results ---'.format(split.upper()))
     if 'valid_loss' in results:
@@ -289,9 +295,16 @@ def main():
         splits = [s.strip() for s in args.splits.split(',')]
 
     all_results = {}
+    mask_dir = None
+    if args.save_masks:
+        mask_dir = args.mask_dir or os.path.join(final_output_dir, 'masks')
+        os.makedirs(mask_dir, exist_ok=True)
+        logger.info('Masks will be saved to: {}'.format(mask_dir))
+
     for split in splits:
         try:
-            all_results[split] = run_split(config, model, split, logger)
+            split_mask_dir = os.path.join(mask_dir, split) if mask_dir else None
+            all_results[split] = run_split(config, model, split, logger, mask_dir=split_mask_dir)
         except Exception as e:
             logger.error('Error evaluating {}: {}'.format(split, e))
             all_results[split] = {'error': str(e)}

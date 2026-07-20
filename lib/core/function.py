@@ -254,7 +254,7 @@ def validate(config, testloader, model, writer_dict):
 
 
 def testval(config, test_dataset, testloader, model,
-            sv_dir='', sv_pred=False):
+            sv_dir='', sv_pred=False, mask_dir=None):
     model.eval()
     confusion_matrix = np.zeros(
         (config.DATASET.NUM_CLASSES, config.DATASET.NUM_CLASSES))
@@ -297,6 +297,14 @@ def testval(config, test_dataset, testloader, model,
                     pred, size[-2:],
                     mode='bilinear', align_corners=config.MODEL.ALIGN_CORNERS
                 )
+
+            if mask_dir is not None:
+                os.makedirs(mask_dir, exist_ok=True)
+                _, pred_mask = torch.max(pred, dim=1)
+                pred_mask = pred_mask.squeeze(0).cpu().numpy().astype(np.uint8)
+                img_name = name[0] if isinstance(name, (list, tuple)) else str(name)
+                safe_name = img_name.replace('/', '_').replace('\\', '_')
+                cv2.imwrite(os.path.join(mask_dir, safe_name + '.png'), pred_mask)
 
             if has_label:
                 confusion_matrix += get_confusion_matrix(
