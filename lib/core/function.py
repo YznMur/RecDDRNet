@@ -29,6 +29,16 @@ import utils.distributed as dist
 VideoCap = Video('./output/cdOffice.mp4')
 map16 = Map16(VideoCap)
 
+MASK_COLORS = np.array([
+    [0, 255, 0],      # Field - green
+    [255, 165, 0],    # Grass - orange
+    [0, 0, 255],      # Windrow - blue
+    [0, 0, 0],        # Unused_objects - black
+    [255, 0, 0],      # Obstacles - red
+], dtype=np.uint8)
+
+MASK_TARGET_SIZE = (2048, 1024)  # (width, height)
+
 
 def compute_segmentation_metrics(confusion_matrix):
     pos = confusion_matrix.sum(1)
@@ -178,9 +188,11 @@ def validate(config, testloader, model, writer_dict, mask_dir=None):
                     eval_pred = eval_pred[-1:]
                 _, pred_mask = torch.max(eval_pred, dim=1)
                 pred_mask = pred_mask.squeeze(0).cpu().numpy().astype(np.uint8)
+                color_mask = MASK_COLORS[pred_mask]
+                color_mask = cv2.resize(color_mask, MASK_TARGET_SIZE, interpolation=cv2.INTER_NEAREST)
                 img_name = name[0] if isinstance(name, (list, tuple)) else str(name)
                 safe_name = img_name.replace('/', '_').replace('\\', '_')
-                cv2.imwrite(os.path.join(mask_dir, safe_name + '.png'), pred_mask)
+                cv2.imwrite(os.path.join(mask_dir, safe_name + '.png'), color_mask[:, :, ::-1])
 
             if has_label:
                 for i, x in enumerate(pred):
@@ -316,9 +328,11 @@ def testval(config, test_dataset, testloader, model,
                 os.makedirs(mask_dir, exist_ok=True)
                 _, pred_mask = torch.max(pred, dim=1)
                 pred_mask = pred_mask.squeeze(0).cpu().numpy().astype(np.uint8)
+                color_mask = MASK_COLORS[pred_mask]
+                color_mask = cv2.resize(color_mask, MASK_TARGET_SIZE, interpolation=cv2.INTER_NEAREST)
                 img_name = name[0] if isinstance(name, (list, tuple)) else str(name)
                 safe_name = img_name.replace('/', '_').replace('\\', '_')
-                cv2.imwrite(os.path.join(mask_dir, safe_name + '.png'), pred_mask)
+                cv2.imwrite(os.path.join(mask_dir, safe_name + '.png'), color_mask[:, :, ::-1])
 
             if has_label:
                 confusion_matrix += get_confusion_matrix(
