@@ -193,6 +193,12 @@ def validate(config, testloader, model, writer_dict, mask_dir=None):
                 img_name = name[0] if isinstance(name, (list, tuple)) else str(name)
                 safe_name = img_name.replace('/', '_').replace('\\', '_')
                 cv2.imwrite(os.path.join(mask_dir, safe_name + '.png'), color_mask[:, :, ::-1])
+                img_bgr = image[0].cpu().numpy().transpose(1, 2, 0)
+                img_bgr = (img_bgr * [0.229, 0.224, 0.225] + [0.485, 0.456, 0.406]) * 255.0
+                img_bgr = np.clip(img_bgr, 0, 255).astype(np.uint8)[:, :, ::-1]
+                img_bgr = cv2.resize(img_bgr, MASK_TARGET_SIZE, interpolation=cv2.INTER_LINEAR)
+                overlay = cv2.addWeighted(img_bgr, 0.5, color_mask[:, :, ::-1], 0.5, 0)
+                cv2.imwrite(os.path.join(mask_dir, safe_name + '_overlay.png'), overlay)
 
             if has_label:
                 for i, x in enumerate(pred):
@@ -333,6 +339,12 @@ def testval(config, test_dataset, testloader, model,
                 img_name = name[0] if isinstance(name, (list, tuple)) else str(name)
                 safe_name = img_name.replace('/', '_').replace('\\', '_')
                 cv2.imwrite(os.path.join(mask_dir, safe_name + '.png'), color_mask[:, :, ::-1])
+                img_bgr = image[0].cpu().numpy().transpose(1, 2, 0)
+                img_bgr = (img_bgr * [0.229, 0.224, 0.225] + [0.485, 0.456, 0.406]) * 255.0
+                img_bgr = np.clip(img_bgr, 0, 255).astype(np.uint8)[:, :, ::-1]
+                img_bgr = cv2.resize(img_bgr, MASK_TARGET_SIZE, interpolation=cv2.INTER_LINEAR)
+                overlay = cv2.addWeighted(img_bgr, 0.5, color_mask[:, :, ::-1], 0.5, 0)
+                cv2.imwrite(os.path.join(mask_dir, safe_name + '_overlay.png'), overlay)
 
             if has_label:
                 confusion_matrix += get_confusion_matrix(
